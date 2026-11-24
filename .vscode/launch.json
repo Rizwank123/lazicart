@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Auth Service",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/Services/auth-service/cmd/server/main.go",
+            "cwd": "${workspaceFolder}/Services/auth-service",
+            "envFile": "${workspaceFolder}/Services/auth-service/sampl.env",
+            "args": []
+        }
+    ]
+}
