@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/Rizwank123/LahziCart/api-gateway/internal/config"
+	gatewaymw "github.com/Rizwank123/LahziCart/api-gateway/internal/middleware"
 	"github.com/Rizwank123/LahziCart/api-gateway/internal/router"
 )
 
@@ -32,6 +33,7 @@ func main() {
 	}
 
 	e := echo.New()
+	e.Use(gatewaymw.NewPropagationMiddleware().Inject)
 
 	router.Register(e, cfg)
 

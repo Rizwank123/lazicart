@@ -38,6 +38,47 @@ func (r *pgxUserRepository) CreateUser(ctx context.Context, user *models.User) e
 	return r.db.QueryRow(ctx, q, args...).Scan(&user.ID, &user.CreatedAt, &user.UpdatedAt)
 }
 
+func (r *pgxUserRepository) ProcessUserCreated(ctx context.Context, eventID uuid.UUID, in models.CreateUserRequest) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var claimed uuid.UUID
+	err = tx.QueryRow(ctx, `
+		INSERT INTO inbox_messages (event_id, event_type)
+		VALUES ($1, $2)
+		ON CONFLICT (event_id) DO NOTHING
+		RETURNING event_id`, eventID, "user.created").Scan(&claimed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tx.Commit(ctx)
+	}
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO users (first_name, last_name, email, phone, is_active, dob, address, auth_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		in.FirstName, in.LastName, in.Email, in.Phone, true, in.Dob, in.Address, in.AuthId)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE inbox_messages
+		SET status = 'processed', processed_at = NOW(), updated_at = NOW()
+		WHERE event_id = $1`, eventID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // DeleteUser implements [models.UserRepository].
 func (r *pgxUserRepository) DeleteUser(ctx context.Context, user *models.User) error {
 	if ctx == nil {

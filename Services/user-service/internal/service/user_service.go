@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/Rizwank123/LahziCart/shared/events"
 	kafkabroker "github.com/Rizwank123/LahziCart/shared/messaging/kafkaBroker"
@@ -41,6 +42,17 @@ func (u *UserServiceImpl) CreateUser(in models.CreateUserRequest) (*models.User,
 		return nil, err
 	}
 	return &user, nil
+}
+
+func (u *UserServiceImpl) CreateUserFromEvent(eventID uuid.UUID, in models.CreateUserRequest) error {
+	if eventID == uuid.Nil {
+		return errors.New("event_id is required")
+	}
+	if err := u.ur.ProcessUserCreated(context.Background(), eventID, in); err != nil {
+		u.logger.Error("failed to process user.created event", zap.Error(err), zap.String("event_id", eventID.String()))
+		return err
+	}
+	return nil
 }
 
 // DeleteUser implements [models.UserService].

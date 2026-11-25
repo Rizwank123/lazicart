@@ -37,6 +37,223 @@ LahziCart is an ecommerce backend built with Go microservices. Each business cap
 
 Synchronous operations use HTTP through the gateway. Asynchronous workflows use Kafka events. Each service has its own database and migration directory.
 
+## Service Communication Design
+
+LahziCart uses gRPC for synchronous service-to-service commands and queries, and Kafka for asynchronous domain events. PostgreSQL remains the source of truth inside each service.
+
+### Communication Topology
+
+```mermaid
+flowchart LR
+    Client[Client] --> Gateway[API Gateway]
+    Gateway -->|gRPC validation / HTTP proxy| Auth[Auth Service]
+    Gateway --> User[User Service]
+    Gateway --> Catalog[Catalog Service]
+    Gateway --> Cart[Cart Service]
+    Gateway --> Order[Order Service]
+    Order -->|gRPC price/product validation| Catalog
+    Order -->|gRPC reserve/release/commit| Inventory[Inventory Service]
+    Order -->|gRPC authorize/capture/refund| Payment[Payment Service]
+    Order -->|gRPC create shipment| Delivery[Delivery Service]
+    Auth --> AuthDB[(Auth DB)]
+    Catalog --> CatalogDB[(Catalog DB)]
+    Inventory --> InventoryDB[(Inventory DB)]
+    Order --> OrderDB[(Order DB)]
+    Payment --> PaymentDB[(Payment DB)]
+    Auth --> Outbox1[Outbox]
+    Order --> Outbox2[Outbox]
+    Inventory --> Outbox3[Outbox]
+    Payment --> Outbox4[Outbox]
+    Outbox1 --> Kafka[(Kafka)]
+    Outbox2 --> Kafka
+    Outbox3 --> Kafka
+    Outbox4 --> Kafka
+    Kafka --> Notification[Notification Service]
+    Kafka --> Search[Future Search Indexer]
+    Kafka --> Analytics[Future Analytics]
+```
+
+### Protocol Responsibilities
+
+| Operation | Protocol | Reason |
+| --- | --- | --- |
+| JWT validation | gRPC | Immediate response is required |
+| Product price validation | gRPC | Checkout needs current catalog data |
+| Inventory reservation | gRPC command | Checkout needs success or failure immediately |
+| Payment authorization | gRPC command | Order needs a payment decision |
+| Shipment creation | gRPC command | Order needs a creation result |
+| Order created | Kafka event | Multiple services may consume it |
+| Payment succeeded/failed | Kafka event | Notifications and fulfillment consume it |
+| Inventory reserved/released | Kafka event | Audit and downstream workflows consume it |
+| Search index update | Kafka event | Indexing should not block catalog writes |
+| Notification delivery | Kafka consumer | Delivery needs retry and DLQ handling |
+
+Do not use a probabilistic filter as the source of truth for stock, price, authorization, or order validation. Exact decisions must be made by the owning service.
+
+### Checkout Saga Sequence
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant O as Order
+    participant P as Catalog
+    participant I as Inventory
+    participant Pay as Payment
+    participant D as Delivery
+    participant K as Kafka
+    C->>O: Create checkout with Idempotency-Key
+    O->>P: Validate products and prices
+    P-->>O: Product snapshots and prices
+    O->>I: Reserve inventory
+    I-->>O: Reserved or rejected
+    alt Inventory rejected
+        O->>O: Mark order cancelled
+        O-->>C: Out of stock
+    else Inventory reserved
+        O->>Pay: Authorize payment
+        Pay-->>O: Authorized or failed
+        alt Payment failed
+            O->>I: Release inventory
+            O->>O: Mark order cancelled
+            O-->>C: Payment failed
+        else Payment authorized
+            O->>Pay: Capture payment
+            Pay-->>O: Captured
+            O->>I: Commit inventory
+            O->>D: Create shipment
+            O->>O: Mark order confirmed
+            O-->>C: Order confirmed
+            O->>K: Publish order.confirmed
+        end
+    end
+```
+
+### Saga State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> CREATED
+    CREATED --> PRICING_VALIDATED
+    PRICING_VALIDATED --> INVENTORY_RESERVING
+    INVENTORY_RESERVING --> INVENTORY_RESERVED
+    INVENTORY_RESERVING --> ORDER_CANCELLED: reserve failed
+    INVENTORY_RESERVED --> PAYMENT_AUTHORIZING
+    PAYMENT_AUTHORIZING --> PAYMENT_AUTHORIZED
+    PAYMENT_AUTHORIZING --> ORDER_CANCELLED: payment failed
+    PAYMENT_AUTHORIZED --> PAYMENT_CAPTURED
+    PAYMENT_CAPTURED --> INVENTORY_COMMITTED
+    INVENTORY_COMMITTED --> ORDER_CONFIRMED
+    ORDER_CONFIRMED --> SHIPMENT_CREATED
+    SHIPMENT_CREATED --> DELIVERED
+    ORDER_CONFIRMED --> ORDER_CANCELLED: cancellation
+    ORDER_CANCELLED --> [*]
+    DELIVERED --> [*]
+```
+
+Compensating actions:
+
+- Inventory failure: cancel the order.
+- Payment failure: release inventory and cancel the order.
+- Payment timeout: retry, then expire and release inventory.
+- Cancellation after authorization: void or refund payment and release inventory.
+- Delivery failure: retry shipment or create an operations task.
+
+### Transactional Outbox Flow
+
+```mermaid
+flowchart LR
+    Command[Service Command] --> LocalTx[Local DB Transaction]
+    LocalTx --> Aggregate[Update Aggregate]
+    LocalTx --> Outbox[Insert Outbox Event]
+    Outbox --> Relay[Outbox Relay Worker]
+    Relay --> Kafka[Kafka]
+    Kafka --> Consumer[Consumer]
+    Consumer --> Inbox[Inbox / Idempotency Table]
+    Inbox --> ConsumerTx[Consumer Local Transaction]
+    ConsumerTx --> ConsumerDB[Consumer Database]
+    Relay -. retry on failure .-> Outbox
+    Consumer -. duplicate event .-> Inbox
+```
+
+The aggregate update and outbox insert commit together. A relay publishes the event later. Consumers record the event ID before applying business effects, so Kafka redelivery does not duplicate the operation.
+
+### Event Envelope
+
+All Kafka events should use a common envelope:
+
+```json
+{
+  "event_id": "uuid",
+  "event_type": "inventory.reserved",
+  "version": 1,
+  "aggregate_type": "order",
+  "aggregate_id": "order-uuid",
+  "saga_id": "saga-uuid",
+  "correlation_id": "request-uuid",
+  "producer": "inventory-service",
+  "occurred_at": "2026-11-25T12:00:00Z",
+  "payload": {}
+}
+```
+
+Use the aggregate ID as the Kafka message key. For order events, the key should be order_id so events for one order remain ordered within a Kafka partition.
+
+### gRPC Contract Rules
+
+Every gRPC request should propagate:
+
+    authorization
+    x-request-id
+    x-correlation-id
+    x-saga-id
+    x-idempotency-key
+
+Every method must define timeout, retry policy, error mapping, idempotency behavior, ownership checks, and whether retry is safe. Retry only transient failures such as Unavailable, ResourceExhausted, and idempotent DeadlineExceeded operations.
+
+Recommended status mapping:
+
+| gRPC status | Meaning |
+| --- | --- |
+| InvalidArgument | Invalid request |
+| Unauthenticated | Missing or invalid authentication |
+| PermissionDenied | User lacks permission |
+| NotFound | Entity does not exist |
+| AlreadyExists | Duplicate resource |
+| FailedPrecondition | Business state prevents operation |
+| Aborted | Concurrency conflict |
+| ResourceExhausted | Out of stock or rate limited |
+| Unavailable | Temporary service failure |
+| DeadlineExceeded | Timeout |
+
+### Required gRPC Contracts
+
+Catalog:
+
+    GetProduct(product_id)
+    GetProductPrice(product_id)
+    ValidateProducts(product_ids)
+    GetProductSnapshot(product_ids)
+
+Inventory:
+
+    ReserveInventory(order_id, items, idempotency_key)
+    ReleaseInventory(order_id)
+    CommitInventory(order_id)
+    CheckAvailability(product_id, quantity)
+
+Payment:
+
+    AuthorizePayment(order_id, amount, idempotency_key)
+    CapturePayment(payment_id, idempotency_key)
+    VoidPayment(payment_id, idempotency_key)
+    RefundPayment(payment_id, amount, idempotency_key)
+    GetPaymentStatus(payment_id)
+
+Delivery:
+
+    CreateShipment(order_id, address, idempotency_key)
+    GetShipment(order_id)
+
 ## Services
 
 | Service | Port | Responsibility | Database |
@@ -79,7 +296,7 @@ Auth endpoints:
 2. Catalog reads products, images, and reviews from its own database.
 3. An authenticated user creates or reads a cart through /api/carts.
 4. Cart stores cart ownership and item quantities without duplicating catalog ownership.
-5. Checkout creates an order through POST /api/orders.
+5. Checkout creates an order through POST /api/orders. Clients should send an `Idempotency-Key` header; repeated requests with the same key and body return the original order, while reusing a key with a different body returns `409 Conflict`.
 6. Order service stores the order and items, then publishes order.created.
 7. Inventory reserves stock and publishes inventory.reserved, or releases it with inventory.released.
 8. Payment status changes publish payment.succeeded or payment.failed.
@@ -106,6 +323,12 @@ The shared Kafka consumer retries failed handlers with exponential backoff and p
 ## Gateway Routes
 
 The gateway listens on http://localhost:7070.
+
+Service health endpoints use `/health` for process liveness and `/ready` for dependency readiness. User-service and notification-service currently verify PostgreSQL connectivity before returning `200 READY`.
+
+## Request Correlation
+
+The API Gateway establishes `X-Request-ID` and `X-Correlation-ID` at the edge and forwards them through reverse-proxy requests. Shared service middleware accepts or generates the same correlation ID and returns it in the response. Checkout requests may provide `X-Saga-ID`; when absent, order-service creates one and returns it. The resulting correlation and Saga IDs are included in the versioned `order.created` event envelope.
 
 | Gateway route | Authentication |
 | --- | --- |

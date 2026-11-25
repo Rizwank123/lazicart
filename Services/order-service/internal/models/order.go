@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -56,12 +57,32 @@ type OrderItem struct {
 	BaseAudit
 }
 
+type OutboxEvent struct {
+	ID            uuid.UUID  `json:"id" db:"id"`
+	EventID       uuid.UUID  `json:"event_id" db:"event_id"`
+	AggregateType string     `json:"aggregate_type" db:"aggregate_type"`
+	AggregateID   uuid.UUID  `json:"aggregate_id" db:"aggregate_id"`
+	EventType     string     `json:"event_type" db:"event_type"`
+	EventVersion  int        `json:"event_version" db:"event_version"`
+	Payload       []byte     `json:"payload" db:"payload"`
+	Status        string     `json:"status" db:"status"`
+	Attempts      int        `json:"attempts" db:"attempts"`
+	AvailableAt   time.Time  `json:"available_at" db:"available_at"`
+	PublishedAt   *time.Time `json:"published_at,omitempty" db:"published_at"`
+	LastError     *string    `json:"last_error,omitempty" db:"last_error"`
+	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
+}
+
 type CreateOrderInput struct {
 	UserID          uuid.UUID         `json:"user_id"`
 	Currency        string            `json:"currency"`
 	ShippingAddress Address           `json:"shipping_address"`
 	Items           []CreateOrderItem `json:"items"`
+	CorrelationID   *uuid.UUID        `json:"-"`
+	SagaID          *uuid.UUID        `json:"-"`
 }
+
+var ErrIdempotencyKeyConflict = errors.New("idempotency key was already used with a different request")
 
 type CreateOrderItem struct {
 	ProductID uuid.UUID `json:"product_id"`
@@ -70,14 +91,17 @@ type CreateOrderItem struct {
 }
 
 type OrderRepository interface {
-	CreateOrder(ctx context.Context, order *Order) error
+	CreateOrder(ctx context.Context, order *Order, event *OutboxEvent, idempotencyKey, requestHash string) (*Order, error)
 	GetOrder(ctx context.Context, id uuid.UUID) (*Order, error)
 	ListByUser(ctx context.Context, userID uuid.UUID, limit, offset int64) ([]Order, error)
-	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+	UpdateStatus(ctx context.Context, id uuid.UUID, status string, event *OutboxEvent) error
+	GetPendingOutboxEvents(ctx context.Context, limit int) ([]OutboxEvent, error)
+	MarkOutboxPublished(ctx context.Context, id uuid.UUID) error
+	MarkOutboxFailed(ctx context.Context, id uuid.UUID, cause string) error
 }
 
 type OrderService interface {
-	CreateOrder(in CreateOrderInput) (*Order, error)
+	CreateOrder(in CreateOrderInput, idempotencyKey string) (*Order, error)
 	GetOrder(id uuid.UUID) (*Order, error)
 	ListByUser(userID uuid.UUID, limit, page int) ([]Order, error)
 	CancelOrder(id uuid.UUID) error

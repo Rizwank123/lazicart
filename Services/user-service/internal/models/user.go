@@ -52,6 +52,7 @@ type (
 	// UserRepository define the interface for user repository
 	UserRepository interface {
 		CreateUser(ctx context.Context, user *User) error
+		ProcessUserCreated(ctx context.Context, eventID uuid.UUID, in CreateUserRequest) error
 		UpdateUser(ctx context.Context, user *User) error
 		DeleteUser(ctx context.Context, user *User) error
 		GetUserByID(ctx context.Context, id uuid.UUID) (*User, error)
@@ -62,6 +63,7 @@ type (
 	// UserService define the interface for user service
 	UserService interface {
 		CreateUser(in CreateUserRequest) (*User, error)
+		CreateUserFromEvent(eventID uuid.UUID, in CreateUserRequest) error
 		UpdateUser(id uuid.UUID, in UpdateUser) (*User, error)
 		DeleteUser(id uuid.UUID) (*User, error)
 		GetUserByID(id uuid.UUID) (*User, error)

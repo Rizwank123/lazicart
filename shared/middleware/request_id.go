@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	gofrsuuid "github.com/gofrs/uuid/v5"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
@@ -40,6 +41,28 @@ func (m *RequestIDMiddleware) Inject(next echo.HandlerFunc) echo.HandlerFunc {
 		// Add to response header for client tracking
 		res.Header().Set(m.headerName, requestID)
 
+		correlationID := parseOrNewID(req.Header.Get("X-Correlation-ID"))
+		c.Set("correlation_id", correlationID)
+		res.Header().Set("X-Correlation-ID", correlationID.String())
+
+		if sagaHeader := req.Header.Get("X-Saga-ID"); sagaHeader != "" {
+			if sagaID, err := gofrsuuid.FromString(sagaHeader); err == nil {
+				c.Set("saga_id", sagaID)
+				res.Header().Set("X-Saga-ID", sagaID.String())
+			}
+		}
+
 		return next(c)
 	}
+}
+
+func parseOrNewID(value string) gofrsuuid.UUID {
+	if id, err := gofrsuuid.FromString(value); err == nil {
+		return id
+	}
+	id, err := gofrsuuid.NewV4()
+	if err != nil {
+		return gofrsuuid.Nil
+	}
+	return id
 }

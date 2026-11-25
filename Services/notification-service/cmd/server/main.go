@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -43,13 +44,21 @@ func main() {
 	repo := repository.NewNotificationRepository(pool)
 	svc := service.NewNotificationService(repo)
 	consumerHandler := consumer.NewHandler(svc)
+	consumerContext, cancelConsumers := context.WithCancel(context.Background())
+	var consumerWG sync.WaitGroup
+	var consumers []*kafkabroker.Consumer
 	for topic, handle := range map[string]func([]byte) error{
 		events.OrderCreated:     consumerHandler.OrderCreated(),
 		events.PaymentSucceeded: consumerHandler.PaymentEvent(events.PaymentSucceeded),
 		events.PaymentFailed:    consumerHandler.PaymentEvent(events.PaymentFailed),
 	} {
-		c := kafkabroker.NewConsumer([]string{"localhost:9092"}, "notification-service-group-"+topic, kafkaProducer, topic, logger)
-		go c.Consume(context.Background(), handle)
+		c := kafkabroker.NewConsumer(cfg.KafkaBrokers, "notification-service-group-"+topic, kafkaProducer, topic, logger)
+		consumers = append(consumers, c)
+		consumerWG.Add(1)
+		go func() {
+			defer consumerWG.Done()
+			c.Consume(consumerContext, handle)
+		}()
 	}
 	r := router.NewNotificationRouter(handler.NewNotificationHandler(svc))
 	e := echo.New()
@@ -60,6 +69,14 @@ func main() {
 	e.Use(sharedmw.NewCORSMiddleware(sharedmw.DefaultCORSConfig()))
 	r.RegisterRoutes(e)
 	e.GET("/health", func(c echo.Context) error { return c.String(http.StatusOK, "OK") })
+	e.GET("/ready", func(c echo.Context) error {
+		checkContext, cancel := context.WithTimeout(c.Request().Context(), 2*time.Second)
+		defer cancel()
+		if err := pool.Ping(checkContext); err != nil {
+			return c.String(http.StatusServiceUnavailable, "NOT_READY")
+		}
+		return c.String(http.StatusOK, "READY")
+	})
 	go func() {
 		logger.Info("notification-service started", zap.String("port", cfg.AppPort))
 		if err := e.Start(":" + cfg.AppPort); err != nil && err != http.ErrServerClosed {
@@ -71,5 +88,19 @@ func main() {
 	<-quit
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	cancelConsumers()
+	for _, c := range consumers {
+		_ = c.Close()
+	}
+	consumerDone := make(chan struct{})
+	go func() {
+		consumerWG.Wait()
+		close(consumerDone)
+	}()
+	select {
+	case <-consumerDone:
+	case <-time.After(5 * time.Second):
+		logger.Warn("timed out waiting for Kafka consumers shutdown")
+	}
 	_ = e.Shutdown(ctx)
 }

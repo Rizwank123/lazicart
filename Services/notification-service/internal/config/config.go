@@ -3,13 +3,14 @@ package config
 import "github.com/spf13/viper"
 
 type NotificationConfig struct {
-	APPName    string `mapstructure:"APP_NAME"`
-	AppPort    string `mapstructure:"APP_PORT"`
-	DBHost     string `mapstructure:"DB_HOST"`
-	DBPort     string `mapstructure:"DB_PORT"`
-	DBUser     string `mapstructure:"DB_USER"`
-	DBPassword string `mapstructure:"DB_PASSWORD"`
-	DBName     string `mapstructure:"DB_NAME"`
+	APPName      string   `mapstructure:"APP_NAME"`
+	AppPort      string   `mapstructure:"APP_PORT"`
+	DBHost       string   `mapstructure:"DB_HOST"`
+	DBPort       string   `mapstructure:"DB_PORT"`
+	DBUser       string   `mapstructure:"DB_USER"`
+	DBPassword   string   `mapstructure:"DB_PASSWORD"`
+	DBName       string   `mapstructure:"DB_NAME"`
+	KafkaBrokers []string `mapstructure:"KAFKA_BROKERS"`
 }
 
 func LoadConfig() (*NotificationConfig, error) {

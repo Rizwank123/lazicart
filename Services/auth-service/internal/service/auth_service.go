@@ -203,7 +203,14 @@ func (a *AuthServiceImpl) RegisterUser(userAuth models.RegisterInput) (models.Us
 	if err != nil {
 		return res, err
 	}
-	a.kafkaProducer.Publish(context.Background(), events.UserCreated, data)
+	envelope := events.NewEnvelope(events.UserCreated, "user", res.ID, "auth-service", json.RawMessage(data))
+	envelopedData, err := json.Marshal(envelope)
+	if err != nil {
+		return res, err
+	}
+	if err := a.kafkaProducer.Publish(context.Background(), events.UserCreated, envelopedData); err != nil {
+		return res, err
+	}
 	return res, nil
 }
 

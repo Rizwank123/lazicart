@@ -51,15 +51,31 @@ func main() {
 	userRouter := router.NewUserRouter(userController)
 	e := echo.New()
 	userRouter.RegisterRoutes(e)
+	e.GET("/health", func(c echo.Context) error {
+		return c.String(http.StatusOK, "OK")
+	})
+	e.GET("/ready", func(c echo.Context) error {
+		checkContext, cancel := context.WithTimeout(c.Request().Context(), 2*time.Second)
+		defer cancel()
+		if err := db.Ping(checkContext); err != nil {
+			return c.String(http.StatusServiceUnavailable, "NOT_READY")
+		}
+		return c.String(http.StatusOK, "READY")
+	})
 	KafkaConsumer := kafkabroker.NewConsumer(
-		[]string{"localhost:9092"},
+		config.KafkaBrokers,
 		"user-service-group",
 		kafkaProducer, // DLQ producer
 		events.UserCreated,
 		logger,
 	)
 	userConsumerHandler := consumer.NewUserConsumerHandler(userService)
-	go KafkaConsumer.Consume(context.Background(), userConsumerHandler.CreateUserHandler())
+	consumerContext, cancelConsumer := context.WithCancel(context.Background())
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		KafkaConsumer.Consume(consumerContext, userConsumerHandler.CreateUserHandler())
+	}()
 
 	go func() {
 		if err := e.Start(":" + config.AppPort); err != nil && err != http.ErrServerClosed {
@@ -74,6 +90,13 @@ func main() {
 	<-quit // Block here until a signal is received
 
 	logger.Info("Shutting down user-service...")
+	cancelConsumer()
+	KafkaConsumer.Close()
+	select {
+	case <-consumerDone:
+	case <-time.After(5 * time.Second):
+		logger.Warn("timed out waiting for Kafka consumer shutdown")
+	}
 
 	// 3. Create a timeout context for the shutdown process
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

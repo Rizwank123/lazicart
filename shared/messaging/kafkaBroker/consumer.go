@@ -3,6 +3,7 @@ package kafkabroker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/Rizwank123/LahziCart/shared/observability"
@@ -48,6 +49,9 @@ func (c *Consumer) Consume(
 	for {
 		msg, err := c.reader.ReadMessage(ctx)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return
+			}
 			c.logger.Error("failed to read message", zap.Error(err))
 			continue
 		}
@@ -95,10 +99,26 @@ func (c *Consumer) processWithRetry(
 			zap.Error(err),
 		)
 
-		time.Sleep(delay)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 
 	return c.SendToDLQ(ctx, message, err)
+}
+
+// Close releases the underlying Kafka reader. Consume also closes it when its
+// context is cancelled; Close is useful when a service owns the lifecycle
+// explicitly during shutdown.
+func (c *Consumer) Close() error {
+	if c.reader == nil {
+		return nil
+	}
+	return c.reader.Close()
 }
 
 func (c *Consumer) SendToDLQ(

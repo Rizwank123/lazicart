@@ -11,6 +11,7 @@ import (
 	"github.com/Rizwank123/LahziCart/order-service/internal/config"
 	"github.com/Rizwank123/LahziCart/order-service/internal/db"
 	"github.com/Rizwank123/LahziCart/order-service/internal/handler"
+	"github.com/Rizwank123/LahziCart/order-service/internal/outbox"
 	"github.com/Rizwank123/LahziCart/order-service/internal/repository"
 	"github.com/Rizwank123/LahziCart/order-service/internal/router"
 	"github.com/Rizwank123/LahziCart/order-service/internal/service"
@@ -42,7 +43,10 @@ func main() {
 	}()
 
 	repo := repository.NewOrderRepository(pool)
-	svc := service.NewOrderService(repo, kafkaProducer, logger)
+	svc := service.NewOrderService(repo, logger)
+	relayContext, relayCancel := context.WithCancel(context.Background())
+	defer relayCancel()
+	go outbox.NewRelay(repo, kafkaProducer, logger).Run(relayContext)
 	h := handler.NewOrderHandler(svc)
 	r := router.NewOrderRouter(h)
 

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -23,8 +24,25 @@ func (h *OrderHandler) Create(c echo.Context) error {
 	if err := c.Bind(&in); err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid request"))
 	}
-	order, err := h.service.CreateOrder(in)
+	if correlationID, ok := c.Get("correlation_id").(uuid.UUID); ok {
+		in.CorrelationID = &correlationID
+	}
+	if sagaID, ok := c.Get("saga_id").(uuid.UUID); ok {
+		in.SagaID = &sagaID
+	}
+	if in.SagaID == nil {
+		sagaID, err := uuid.NewV4()
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, response.Error("failed to create saga id"))
+		}
+		in.SagaID = &sagaID
+		c.Response().Header().Set("X-Saga-ID", sagaID.String())
+	}
+	order, err := h.service.CreateOrder(in, c.Request().Header.Get("Idempotency-Key"))
 	if err != nil {
+		if errors.Is(err, models.ErrIdempotencyKeyConflict) {
+			return c.JSON(http.StatusConflict, response.Error(err.Error()))
+		}
 		return c.JSON(http.StatusBadRequest, response.Error(err.Error()))
 	}
 	return c.JSON(http.StatusCreated, response.Success("order created", order))
