@@ -326,6 +326,8 @@ The gateway listens on http://localhost:7070.
 
 Service health endpoints use `/health` for process liveness and `/ready` for dependency readiness. User-service and notification-service currently verify PostgreSQL connectivity before returning `200 READY`.
 
+Tracing is available through OpenTelemetry. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to enable OTLP HTTP export; set `OTEL_EXPORTER_OTLP_INSECURE=true` for a local plaintext collector. Without an endpoint, services still create local spans but do not export them. Kafka producers and consumers propagate W3C trace context through message headers.
+
 ## Request Correlation
 
 The API Gateway establishes `X-Request-ID` and `X-Correlation-ID` at the edge and forwards them through reverse-proxy requests. Shared service middleware accepts or generates the same correlation ID and returns it in the response. Checkout requests may provide `X-Saga-ID`; when absent, order-service creates one and returns it. The resulting correlation and Saga IDs are included in the versioned `order.created` event envelope.

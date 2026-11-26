@@ -19,6 +19,7 @@ import (
 	"github.com/Rizwank123/LahziCart/shared/events"
 	kafkabroker "github.com/Rizwank123/LahziCart/shared/messaging/kafkaBroker"
 	sharedmw "github.com/Rizwank123/LahziCart/shared/middleware"
+	"github.com/Rizwank123/LahziCart/shared/observability"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
@@ -30,6 +31,11 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to load config", zap.Error(err))
 	}
+	shutdownTracer, err := observability.InitTracer(context.Background(), "notification-service")
+	if err != nil {
+		logger.Fatal("failed to initialize tracing", zap.Error(err))
+	}
+	defer shutdownTracer(context.Background())
 	pool, err := db.NewDatabase(cfg)
 	if err != nil {
 		logger.Fatal("failed to connect database", zap.Error(err))
@@ -57,11 +63,20 @@ func main() {
 		consumerWG.Add(1)
 		go func() {
 			defer consumerWG.Done()
-			c.Consume(consumerContext, handle)
+			c.ConsumeWithContext(consumerContext, func(messageContext context.Context, message []byte) error {
+				if correlationID, ok := events.CorrelationID(messageContext); ok {
+					logger.Debug("processing notification event", zap.String("topic", topic), zap.String("correlation_id", correlationID.String()))
+				}
+				if sagaID, ok := events.SagaID(messageContext); ok {
+					logger.Debug("notification event saga", zap.String("topic", topic), zap.String("saga_id", sagaID.String()))
+				}
+				return handle(message)
+			})
 		}()
 	}
 	r := router.NewNotificationRouter(handler.NewNotificationHandler(svc))
 	e := echo.New()
+	e.Use(observability.TracingMiddleware("notification-service"))
 	e.Use(sharedmw.NewRecoveryMiddleware(logger).Recover)
 	e.Use(sharedmw.NewRequestIDMiddleware("X-Request-ID").Inject)
 	e.Use(sharedmw.NewLoggingMiddleware(logger, "/health").Log)

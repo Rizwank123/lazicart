@@ -15,6 +15,7 @@ import (
 	"github.com/Rizwank123/LahziCart/catalog-service/internal/router"
 	"github.com/Rizwank123/LahziCart/catalog-service/internal/service"
 	sharedmw "github.com/Rizwank123/LahziCart/shared/middleware"
+	"github.com/Rizwank123/LahziCart/shared/observability"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
@@ -27,6 +28,11 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to load config", zap.Error(err))
 	}
+	shutdownTracer, err := observability.InitTracer(context.Background(), "catalog-service")
+	if err != nil {
+		logger.Fatal("failed to initialize tracing", zap.Error(err))
+	}
+	defer shutdownTracer(context.Background())
 
 	pool, err := db.NewDatabase(cfg)
 	if err != nil {
@@ -40,6 +46,7 @@ func main() {
 	productRouter := router.NewProductRouter(productHandler)
 
 	e := echo.New()
+	e.Use(observability.TracingMiddleware("catalog-service"))
 	e.Validator = sharedmw.NewValidator()
 	e.Use(sharedmw.NewRecoveryMiddleware(logger).Recover)
 	e.Use(sharedmw.NewRequestIDMiddleware("X-Request-ID").Inject)

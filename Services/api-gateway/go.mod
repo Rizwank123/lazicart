@@ -2,7 +2,10 @@ module github.com/Rizwank123/LahziCart/api-gateway
 
 go 1.24.12
 
+replace github.com/Rizwank123/LahziCart/shared => ../../shared
+
 require (
+	github.com/Rizwank123/LahziCart/shared v0.0.0-00010101000000-000000000000
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect

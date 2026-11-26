@@ -6,9 +6,13 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Rizwank123/LahziCart/shared/events"
 	"github.com/Rizwank123/LahziCart/shared/observability"
 	"github.com/Rizwank123/LahziCart/shared/utils"
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -44,6 +48,17 @@ func (c *Consumer) Consume(
 	ctx context.Context,
 	handler func(message []byte) error,
 ) {
+	c.ConsumeWithContext(ctx, func(_ context.Context, message []byte) error {
+		return handler(message)
+	})
+}
+
+// ConsumeWithContext enriches each message context with correlation and Saga
+// IDs from the shared event envelope before invoking the handler.
+func (c *Consumer) ConsumeWithContext(
+	ctx context.Context,
+	handler func(context.Context, []byte) error,
+) {
 	defer c.reader.Close()
 
 	for {
@@ -58,7 +73,12 @@ func (c *Consumer) Consume(
 
 		start := time.Now()
 
-		err = c.processWithRetry(ctx, msg.Value, handler)
+		messageContext := events.ContextFromMessage(ctx, msg.Value)
+		messageContext = contextFromKafkaHeaders(messageContext, msg.Headers)
+		tracer := otel.Tracer("shared.kafka")
+		messageContext, span := tracer.Start(messageContext, "kafka.consume "+c.topic, trace.WithSpanKind(trace.SpanKindConsumer))
+		err = c.processWithRetry(messageContext, msg.Value, handler)
+		span.End()
 
 		duration := time.Since(start).Seconds()
 		observability.KafkaProcessingDration.
@@ -78,15 +98,23 @@ func (c *Consumer) Consume(
 	}
 }
 
+func contextFromKafkaHeaders(ctx context.Context, headers []kafka.Header) context.Context {
+	carrier := propagation.MapCarrier{}
+	for _, header := range headers {
+		carrier[header.Key] = string(header.Value)
+	}
+	return propagation.TraceContext{}.Extract(ctx, carrier)
+}
+
 func (c *Consumer) processWithRetry(
 	ctx context.Context,
 	message []byte,
-	handler func(message []byte) error,
+	handler func(context.Context, []byte) error,
 ) error {
 	var err error
 
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
-		err = handler(message)
+		err = handler(ctx, message)
 		if err == nil {
 			return nil
 		}

@@ -26,6 +26,7 @@ import (
 	"github.com/Rizwank123/LahziCart/auth-service/internal/utils"
 
 	kafkabroker "github.com/Rizwank123/LahziCart/shared/messaging/kafkaBroker"
+	sharedmw "github.com/Rizwank123/LahziCart/shared/middleware"
 	"github.com/Rizwank123/LahziCart/shared/observability"
 	authpb "github.com/Rizwank123/LahziCart/shared/proto"
 )
@@ -45,6 +46,11 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to load config", zap.Error(err))
 	}
+	shutdownTracer, err := observability.InitTracer(context.Background(), "auth-service")
+	if err != nil {
+		logger.Fatal("failed to initialize tracing", zap.Error(err))
+	}
+	defer shutdownTracer(context.Background())
 
 	// ------------------------------------------------
 	// Database
@@ -109,6 +115,8 @@ func main() {
 	// HTTP Server
 	// ------------------------------------------------
 	e := echo.New()
+	e.Use(observability.TracingMiddleware("auth-service"))
+	e.Use(sharedmw.NewRequestIDMiddleware("X-Request-ID").Inject)
 
 	handlers := handler.NewAuthHandler(authService)
 	authRouter := router.NewAuthRouter(handlers)

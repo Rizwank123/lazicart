@@ -10,6 +10,7 @@ import (
 
 	"github.com/Rizwank123/LahziCart/shared/events"
 	kafkabroker "github.com/Rizwank123/LahziCart/shared/messaging/kafkaBroker"
+	"github.com/Rizwank123/LahziCart/shared/observability"
 	"github.com/Rizwank123/lahziCart/user-service/internal/config"
 	"github.com/Rizwank123/lahziCart/user-service/internal/consumer"
 	"github.com/Rizwank123/lahziCart/user-service/internal/db"
@@ -30,6 +31,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	shutdownTracer, err := observability.InitTracer(context.Background(), "user-service")
+	if err != nil {
+		logger.Fatal("failed to initialize tracing", zap.Error(err))
+	}
+	defer shutdownTracer(context.Background())
 	db, err := db.NewDatabase(config)
 	if err != nil {
 		panic(err)
@@ -50,6 +56,7 @@ func main() {
 	userController := handler.NewUserController(userService)
 	userRouter := router.NewUserRouter(userController)
 	e := echo.New()
+	e.Use(observability.TracingMiddleware("user-service"))
 	userRouter.RegisterRoutes(e)
 	e.GET("/health", func(c echo.Context) error {
 		return c.String(http.StatusOK, "OK")
@@ -74,7 +81,12 @@ func main() {
 	consumerDone := make(chan struct{})
 	go func() {
 		defer close(consumerDone)
-		KafkaConsumer.Consume(consumerContext, userConsumerHandler.CreateUserHandler())
+		KafkaConsumer.ConsumeWithContext(consumerContext, func(messageContext context.Context, message []byte) error {
+			if correlationID, ok := events.CorrelationID(messageContext); ok {
+				logger.Debug("processing user event", zap.String("correlation_id", correlationID.String()))
+			}
+			return userConsumerHandler.CreateUserHandler()(message)
+		})
 	}()
 
 	go func() {

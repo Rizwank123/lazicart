@@ -6,6 +6,9 @@ import (
 
 	"github.com/Rizwank123/LahziCart/shared/config"
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -28,6 +31,16 @@ func NewProducer(brokers []string, logger *zap.Logger) *Producer {
 }
 
 func (p *Producer) Publish(ctx context.Context, topic string, message []byte) error {
+	tracer := otel.Tracer("shared.kafka")
+	ctx, span := tracer.Start(ctx, "kafka.publish "+topic, trace.WithSpanKind(trace.SpanKindProducer))
+	defer span.End()
+
+	carrier := propagation.MapCarrier{}
+	propagation.TraceContext{}.Inject(ctx, carrier)
+	headers := make([]kafka.Header, 0, len(carrier))
+	for key, value := range carrier {
+		headers = append(headers, kafka.Header{Key: key, Value: []byte(value)})
+	}
 	// ensure topic exists
 	// err := events.EnsureTopic(p.Brokers, topic, 1, 1)
 	// if err != nil {
@@ -35,8 +48,9 @@ func (p *Producer) Publish(ctx context.Context, topic string, message []byte) er
 	// 	return err
 	// }
 	err := p.writer.WriteMessages(ctx, kafka.Message{
-		Topic: topic,
-		Value: message,
+		Topic:   topic,
+		Value:   message,
+		Headers: headers,
 	})
 	if err != nil {
 		p.Logger.Error("failed to publish message", zap.Error(err))

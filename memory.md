@@ -47,8 +47,8 @@ Last updated: 2026-11-25
 - [~] Checkout idempotency keys. Order service persists an optional `Idempotency-Key` and request hash atomically with the order and outbox event; same-request replay returns the original order, conflicting reuse returns 409.
 - [~] Configurable Kafka broker injection everywhere. User and notification consumers now use loaded `KAFKA_BROKERS`; remaining consumer hosts still need migration.
 - [~] Readiness checks and graceful consumer shutdown. User and notification expose database-backed `/ready` checks and graceful Kafka shutdown; remaining hosts and richer dependency checks remain.
-- [~] Request, correlation, and Saga IDs. Gateway and shared HTTP middleware establish/propagate request and correlation IDs, preserve optional Saga IDs, and order-created envelopes carry both IDs. Kafka consumer context propagation remains.
-- [ ] OpenTelemetry tracing.
+- [~] Request, correlation, and Saga IDs. Gateway and shared HTTP middleware establish/propagate request and correlation IDs, preserve optional Saga IDs, and order-created envelopes carry both IDs. Active Kafka consumers extract envelope IDs into handler context; legacy non-enveloped events still need migration.
+- [~] OpenTelemetry tracing. Shared tracer initialization and Echo middleware are wired into API Gateway and all HTTP services; Kafka producers inject W3C trace context and consumers create linked spans. Collector-backed integration verification remains.
 
 ### Phase 1: Catalog and search
 
@@ -160,6 +160,14 @@ Compensations:
 - Verification: `go test ./...` passes in `Services/order-service` and `shared`; gateway header propagation and Kafka consumer context propagation remain.
 - Added API Gateway propagation middleware. It establishes valid `X-Request-ID` and `X-Correlation-ID` headers, preserves valid `X-Saga-ID`, and forwards all three through reverse-proxy requests.
 - Verification: `go test ./...` passes in `Services/api-gateway`; Kafka consumer context propagation remains.
+- Added `events.ContextFromMessage` and `Consumer.ConsumeWithContext` so Kafka handlers receive correlation and Saga IDs from versioned envelopes. User and notification consumers now use the context-aware API.
+- Verification: `go test ./...` passes in `shared`, `Services/user-service`, and `Services/notification-service`. Legacy event producers that do not emit envelopes remain to be migrated.
+- Added shared OpenTelemetry tracer initialization and HTTP tracing middleware. API Gateway and order-service now create spans; `OTEL_EXPORTER_OTLP_ENDPOINT` enables OTLP HTTP export and `OTEL_EXPORTER_OTLP_INSECURE=true` supports local plaintext collectors.
+- Verification: `go test ./...` passes in `shared`, `Services/api-gateway`, and `Services/order-service` after tracing changes. Remaining work is service-wide rollout and Kafka producer/consumer span propagation.
+- Rolled the shared tracing provider and HTTP middleware into auth, user, catalog, inventory, cart, payment, notification, and delivery services.
+- Verification: all eight service modules passed `go test ./...`; the earlier user-service initialization-order issue was corrected. Kafka producer/consumer span links remain.
+- Added W3C trace-context injection to the shared Kafka producer and extraction plus consumer spans to the shared Kafka consumer. Kafka retry handler execution now runs under the extracted trace context.
+- Verification: `go test ./...` passes in `shared` and `Services/order-service`; end-to-end collector verification remains.
 
 ## Update Rules
 

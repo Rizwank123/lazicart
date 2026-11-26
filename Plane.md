@@ -122,8 +122,8 @@ Priority: P0
 - [~] Add checkout Idempotency-Key storage. Order service now persists an optional key and request hash atomically with the order; same-request replay returns the original order and conflicting reuse returns 409.
 - [~] Make Kafka brokers configurable in every consumer. User and notification consumers now use `KAFKA_BROKERS`; remaining consumer hosts still need migration.
 - [~] Add readiness checks and graceful consumer shutdown. User and notification now expose database-backed `/ready` checks and graceful Kafka shutdown; remaining hosts and richer dependency checks still need work.
-- [~] Add request, correlation, and Saga ID propagation. Gateway and shared HTTP middleware now establish/propagate request and correlation IDs, preserve optional Saga IDs, and order-created envelopes carry both IDs. Kafka consumer context propagation remains.
-- [ ] Add OpenTelemetry tracing.
+- [~] Add request, correlation, and Saga ID propagation. Gateway and shared HTTP middleware establish/propagate request and correlation IDs, preserve optional Saga IDs, and order-created envelopes carry both IDs. Active Kafka consumers now extract envelope IDs into handler context; legacy non-enveloped events still need migration.
+- [~] Add OpenTelemetry tracing. Shared tracer initialization and Echo middleware are wired into API Gateway and all HTTP services; Kafka producers now inject W3C trace context and consumers create linked spans. Collector-backed integration verification remains.
 
 Acceptance: database writes and event intent commit atomically; retries do not duplicate business effects; correlated logs follow checkout across services.
 

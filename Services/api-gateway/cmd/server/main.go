@@ -14,6 +14,7 @@ import (
 	"github.com/Rizwank123/LahziCart/api-gateway/internal/config"
 	gatewaymw "github.com/Rizwank123/LahziCart/api-gateway/internal/middleware"
 	"github.com/Rizwank123/LahziCart/api-gateway/internal/router"
+	"github.com/Rizwank123/LahziCart/shared/observability"
 )
 
 // @title API Gateway
@@ -31,8 +32,14 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to load config", zap.Error(err))
 	}
+	shutdownTracer, err := observability.InitTracer(context.Background(), "api-gateway")
+	if err != nil {
+		logger.Fatal("failed to initialize tracing", zap.Error(err))
+	}
+	defer shutdownTracer(context.Background())
 
 	e := echo.New()
+	e.Use(observability.TracingMiddleware("api-gateway"))
 	e.Use(gatewaymw.NewPropagationMiddleware().Inject)
 
 	router.Register(e, cfg)

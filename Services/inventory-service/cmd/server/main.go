@@ -16,6 +16,7 @@ import (
 	"github.com/Rizwank123/LahziCart/inventory-service/internal/service"
 	kafkabroker "github.com/Rizwank123/LahziCart/shared/messaging/kafkaBroker"
 	sharedmw "github.com/Rizwank123/LahziCart/shared/middleware"
+	"github.com/Rizwank123/LahziCart/shared/observability"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
@@ -28,6 +29,11 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to load config", zap.Error(err))
 	}
+	shutdownTracer, err := observability.InitTracer(context.Background(), "inventory-service")
+	if err != nil {
+		logger.Fatal("failed to initialize tracing", zap.Error(err))
+	}
+	defer shutdownTracer(context.Background())
 	pool, err := db.NewDatabase(cfg)
 	if err != nil {
 		logger.Fatal("failed to connect database", zap.Error(err))
@@ -47,6 +53,7 @@ func main() {
 	r := router.NewInventoryRouter(h)
 
 	e := echo.New()
+	e.Use(observability.TracingMiddleware("inventory-service"))
 	e.Use(sharedmw.NewRecoveryMiddleware(logger).Recover)
 	e.Use(sharedmw.NewRequestIDMiddleware("X-Request-ID").Inject)
 	e.Use(sharedmw.NewLoggingMiddleware(logger, "/health").Log)
