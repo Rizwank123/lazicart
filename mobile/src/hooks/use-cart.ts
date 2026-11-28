@@ -18,8 +18,10 @@ export function useCartActions() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["cart", userId] });
 
   const add = useMutation({
-    mutationFn: (payload: { product_id: string; quantity: number; unit_price: number; currency: string }) =>
-      cartApi.addItem({ user_id: userId as string, ...payload }),
+    mutationFn: (payload: { product_id: string; quantity: number; unit_price: number; currency: string }) => {
+      if (!userId) throw new Error("Your session is not ready yet. Please try again.");
+      return cartApi.addItem({ user_id: userId, ...payload });
+    },
     onSuccess: invalidate,
   });
   const update = useMutation({
@@ -31,7 +33,10 @@ export function useCartActions() {
     onSuccess: invalidate,
   });
   const clear = useMutation({
-    mutationFn: () => cartApi.clear(userId as string),
+    mutationFn: () => {
+      if (!userId) throw new Error("Your session is not ready yet. Please try again.");
+      return cartApi.clear(userId);
+    },
     onSuccess: invalidate,
   });
 

@@ -3,13 +3,14 @@ package router
 import (
 	"github.com/labstack/echo/v4"
 	echoSwagger "github.com/swaggo/echo-swagger"
+	"go.uber.org/zap"
 
 	"github.com/Rizwank123/LahziCart/api-gateway/internal/config"
 	"github.com/Rizwank123/LahziCart/api-gateway/internal/middleware"
 	"github.com/Rizwank123/LahziCart/api-gateway/internal/proxy"
 )
 
-func Register(e *echo.Echo, cfg *config.ApiGateWayConfig) {
+func Register(e *echo.Echo, cfg *config.ApiGateWayConfig, sessions middleware.SessionStore, logger *zap.Logger) {
 
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
@@ -31,44 +32,45 @@ func Register(e *echo.Echo, cfg *config.ApiGateWayConfig) {
 	e.GET("/api/products", productProxy)
 	e.GET("/api/products/*", productProxy)
 
-	userGroup := e.Group("/api/users")
-	userGroup.Use(middleware.JWTMiddleware(cfg.JWTSecret))
+	// Every protected route first verifies the token, then checks that the
+	// session is still live, then resolves the caller identity.
+	protected := func(group *echo.Group) *echo.Group {
+		group.Use(middleware.JWTMiddleware(cfg.JWTSecret))
+		group.Use(middleware.RevocationMiddleware(sessions, logger))
+		group.Use(middleware.IdentityMiddleware)
+		return group
+	}
+
+	userGroup := protected(e.Group("/api/users"))
 	userGroup.Any("/*", userProxy)
 
-	productGroup := e.Group("/api/products")
-	productGroup.Use(middleware.JWTMiddleware(cfg.JWTSecret))
+	productGroup := protected(e.Group("/api/products"))
 	productGroup.POST("", productProxy)
 	productGroup.PUT("/*", productProxy)
 	productGroup.DELETE("/*", productProxy)
 	productGroup.POST("/*", productProxy)
 
-	inventoryGroup := e.Group("/api/inventory")
-	inventoryGroup.Use(middleware.JWTMiddleware(cfg.JWTSecret))
+	inventoryGroup := protected(e.Group("/api/inventory"))
 	inventoryGroup.Any("", inventoryProxy)
 	inventoryGroup.Any("/*", inventoryProxy)
 
-	cartGroup := e.Group("/api/carts")
-	cartGroup.Use(middleware.JWTMiddleware(cfg.JWTSecret))
+	cartGroup := protected(e.Group("/api/carts"))
 	cartGroup.Any("", cartProxy)
 	cartGroup.Any("/*", cartProxy)
 
-	orderGroup := e.Group("/api/orders")
-	orderGroup.Use(middleware.JWTMiddleware(cfg.JWTSecret))
+	orderGroup := protected(e.Group("/api/orders"))
 	orderGroup.Any("", orderProxy)
 	orderGroup.Any("/*", orderProxy)
 
-	paymentGroup := e.Group("/api/payments")
-	paymentGroup.Use(middleware.JWTMiddleware(cfg.JWTSecret))
+	paymentGroup := protected(e.Group("/api/payments"))
 	paymentGroup.Any("", paymentProxy)
 	paymentGroup.Any("/*", paymentProxy)
 
-	notificationGroup := e.Group("/api/notifications")
-	notificationGroup.Use(middleware.JWTMiddleware(cfg.JWTSecret))
+	notificationGroup := protected(e.Group("/api/notifications"))
 	notificationGroup.Any("", notificationProxy)
 	notificationGroup.Any("/*", notificationProxy)
 
-	deliveryGroup := e.Group("/api/deliveries")
-	deliveryGroup.Use(middleware.JWTMiddleware(cfg.JWTSecret))
+	deliveryGroup := protected(e.Group("/api/deliveries"))
 	deliveryGroup.Any("", deliveryProxy)
 	deliveryGroup.Any("/*", deliveryProxy)
 }

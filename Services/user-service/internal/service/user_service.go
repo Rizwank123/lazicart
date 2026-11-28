@@ -62,6 +62,13 @@ func (u *UserServiceImpl) DeleteUser(id uuid.UUID) (*models.User, error) {
 		u.logger.Error("failed to get user", zap.Error(err))
 		return nil, err
 	}
+	// The profile is marked as deleted first. The event is published
+	// afterwards, so a broker problem cannot leave the profile intact while
+	// the caller is told that the delete failed.
+	if err := u.ur.DeleteUser(context.Background(), user); err != nil {
+		u.logger.Error("failed to delete user", zap.Error(err))
+		return nil, err
+	}
 	event := events.UserDeletedEvent{
 		EventType: events.UserDeleted,
 		Version:   1,
@@ -71,12 +78,12 @@ func (u *UserServiceImpl) DeleteUser(id uuid.UUID) (*models.User, error) {
 	eventByte, err := json.Marshal(event)
 	if err != nil {
 		u.logger.Error("failed to marshal user deleted event", zap.Error(err))
-		return nil, err
+		return user, nil
 	}
-	err = u.kafka.Publish(context.Background(), events.UserDeleted, eventByte)
-	if err != nil {
+	if err := u.kafka.Publish(context.Background(), events.UserDeleted, eventByte); err != nil {
+		// The delete already happened, so the event failure is logged
+		// instead of being reported to the caller.
 		u.logger.Error("failed to publish user deleted event", zap.Error(err))
-		return nil, err
 	}
 	return user, nil
 }
@@ -130,7 +137,9 @@ func (u *UserServiceImpl) UpdateUser(id uuid.UUID, in models.UpdateUser) (*model
 	if in.Phone != "" {
 		user.Phone = in.Phone
 	}
-	user.Address = in.Address
+	if in.Address != nil {
+		user.Address = *in.Address
+	}
 	if !in.Dob.IsZero() {
 		user.Dob = in.Dob
 	}
@@ -152,12 +161,13 @@ func (u *UserServiceImpl) UpdateUser(id uuid.UUID, in models.UpdateUser) (*model
 	eventByte, err := json.Marshal(event)
 	if err != nil {
 		u.logger.Error("failed to marshal user updated event", zap.Error(err))
-		return nil, err
+		return user, nil
 	}
-	err = u.kafka.Publish(context.Background(), events.UserUpdated, eventByte)
-	if err != nil {
+	if err := u.kafka.Publish(context.Background(), events.UserUpdated, eventByte); err != nil {
+		// The profile was already updated, so the event failure is logged
+		// instead of being reported to the caller. Reporting it would tell
+		// the client that the update failed even though it was stored.
 		u.logger.Error("failed to publish user updated event", zap.Error(err))
-		return nil, err
 	}
 	return user, nil
 }

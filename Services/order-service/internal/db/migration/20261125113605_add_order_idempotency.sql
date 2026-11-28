@@ -1,14 +1,5 @@
 -- +goose Up
 -- +goose StatementBegin
-SELECT 'up SQL query';
--- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-SELECT 'down SQL query';
--- +goose StatementEnd
--- +goose Up
--- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS "public"."order_idempotency_keys" (
     "idempotency_key" varchar(255) PRIMARY KEY,
     "request_hash" varchar(64) NOT NULL,

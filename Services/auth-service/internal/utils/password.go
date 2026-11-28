@@ -14,6 +14,7 @@ type AuthManager interface {
 	ComparePassword(password string, hash string) error
 	GenerateToken(userId string, role string) (*models.LoginResponse, error)
 	ValidateToken(token string) (*jwt.Token, error)
+	ValidateRefreshToken(token string) (*jwt.Token, error)
 }
 type authManager struct {
 	config *config.AuthConfig
@@ -26,6 +27,21 @@ func (a *authManager) ValidateToken(token string) (*jwt.Token, error) {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return []byte(a.config.SecretKey), nil
+	})
+}
+
+// ValidateRefreshToken implements [AuthManager].
+//
+// Refresh tokens are signed with RefreshKey while access tokens are signed
+// with SecretKey, so they must be verified with their own key. Validating a
+// refresh token with SecretKey always fails the signature check and breaks
+// the entire refresh flow.
+func (a *authManager) ValidateRefreshToken(token string) (*jwt.Token, error) {
+	return jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(a.config.RefreshKey), nil
 	})
 }
 

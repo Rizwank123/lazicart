@@ -34,6 +34,21 @@ export type AuthTokens = {
   jti: string;
 };
 
+/**
+ * The auth-service account record returned by registration.
+ *
+ * It is not the profile of the user-service: the profile is created
+ * asynchronously from the user.created event and is fetched separately.
+ */
+export type AuthUser = {
+  id: UUID;
+  email?: string;
+  phone?: string;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type RegisterPayload = {
   email: string;
   phone: string;
@@ -55,6 +70,32 @@ export type User = BaseEntity & {
   dob?: string;
   gender?: string;
   address?: Address;
+};
+
+/**
+ * Fields the user-service accepts on update.
+ *
+ * `Partial<User>` is not correct here: the backend ignores id, auth_id and
+ * the audit timestamps, and it replaces the whole address when the field is
+ * present.
+ */
+export type UpdateUserPayload = {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
+  dob?: string;
+  gender?: string;
+  address?: Address;
+};
+
+export type InventoryItem = BaseEntity & {
+  product_id: UUID;
+  sku?: string | null;
+  quantity_available: number;
+  quantity_reserved: number;
+  reorder_level: number;
+  is_active: boolean;
 };
 
 export type ProductImage = BaseEntity & {

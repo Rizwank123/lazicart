@@ -7,7 +7,7 @@ import { Text } from "@/components/ui/text";
 import { useAppTheme } from "@/hooks/use-app-theme";
 import { useWishlistStore } from "@/store/wishlist-store";
 import type { Product } from "@/types/api";
-import { formatMoney } from "@/utils/format";
+import { averageRating, formatMoney } from "@/utils/format";
 
 type Props = {
   product: Product;
@@ -19,8 +19,9 @@ export function ProductCard({ product, onPress }: Props) {
   const wished = useWishlistStore((state) => state.has(product.id));
   const toggle = useWishlistStore((state) => state.toggle);
   const image = product.images?.[0]?.thumbnail_url || product.images?.[0]?.image_url;
-  const reviews = product.review ?? [];
-  const avg = reviews.length ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length : 0;
+  // A review that is still pending moderation is not public and must not
+  // influence the displayed rating.
+  const avg = averageRating(product.review);
 
   return (
     <Pressable onPress={onPress} style={styles.press}>

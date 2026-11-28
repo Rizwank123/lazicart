@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams, type Href } from "expo-router";
 import { useState } from "react";
 import { StyleSheet } from "react-native";
 
@@ -15,6 +15,8 @@ import { useAuthStore } from "@/store/auth-store";
 export default function OtpScreen() {
   const { colors } = useAppTheme();
   const setSession = useAuthStore((state) => state.setSession);
+  // The screen that sent the visitor here is returned to after signing in.
+  const { from } = useLocalSearchParams<{ from?: string }>();
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [sent, setSent] = useState(false);
@@ -40,7 +42,7 @@ export default function OtpScreen() {
     try {
       const tokens = await authApi.loginWithPhone(phone, otp);
       await setSession(tokens);
-      router.replace("/(tabs)");
+      router.replace((from?.startsWith("/") ? from : "/(tabs)") as Href);
     } catch (err) {
       setError(getApiError(err, "OTP login failed"));
     } finally {
@@ -52,10 +54,38 @@ export default function OtpScreen() {
     <Screen contentContainerStyle={styles.container}>
       <Text variant="display">Phone sign in</Text>
       <Card style={styles.form}>
-        <Input label="Phone" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
+        <Input
+          label="Phone"
+          keyboardType="phone-pad"
+          value={phone}
+          // The phone number is locked once a code was sent, because the code
+          // was delivered to that number. Changing it here would verify the
+          // code against a different phone.
+          editable={!sent}
+          onChangeText={(value) => {
+            setPhone(value);
+            setOtp("");
+            setSent(false);
+          }}
+        />
         {sent && <Input label="OTP" keyboardType="number-pad" value={otp} onChangeText={setOtp} maxLength={6} />}
         {!!error && <Text variant="caption" style={{ color: colors.danger }}>{error}</Text>}
-        <Button title={sent ? "Verify and continue" : "Send OTP"} loading={loading} onPress={sent ? login : sendOtp} />
+        {sent ? (
+          <>
+            <Button title="Verify and continue" loading={loading} onPress={login} />
+            <Button title="Resend OTP" variant="secondary" loading={loading} onPress={sendOtp} />
+            <Button
+              title="Use a different number"
+              variant="ghost"
+              onPress={() => {
+                setSent(false);
+                setOtp("");
+              }}
+            />
+          </>
+        ) : (
+          <Button title="Send OTP" loading={loading} onPress={sendOtp} />
+        )}
       </Card>
     </Screen>
   );

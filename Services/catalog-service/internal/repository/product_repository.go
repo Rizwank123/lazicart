@@ -142,7 +142,70 @@ func (r *pgxProductRepository) GetAllProducts(ctx context.Context, limit, offset
 		return 0, nil, err
 	}
 
+	// Load images and reviews for the whole page with two queries instead of
+	// two queries per product, so list responses match the detail response and
+	// the client can render images and ratings on cards.
+	if err := r.attachImagesAndReviews(ctx, products); err != nil {
+		return 0, nil, err
+	}
+
 	return total, products, nil
+}
+
+// attachImagesAndReviews populates Images and Review for every product in the
+// slice using a single query per relation.
+func (r *pgxProductRepository) attachImagesAndReviews(ctx context.Context, products []models.Product) error {
+	if len(products) == 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	ids := make([]uuid.UUID, 0, len(products))
+	index := make(map[uuid.UUID]int, len(products))
+	for i := range products {
+		ids = append(ids, products[i].ID)
+		index[products[i].ID] = i
+	}
+
+	imageRows, err := r.db.Query(ctx, `
+		SELECT id, product_id, image_url, thumbnail_url, is_primary, display_order, created_at, updated_at, deleted_at
+		FROM product_images
+		WHERE product_id = ANY($1) AND deleted_at IS NULL
+		ORDER BY is_primary DESC, display_order ASC, created_at ASC`, ids)
+	if err != nil {
+		return err
+	}
+	images, err := pgx.CollectRows(imageRows, pgx.RowToStructByNameLax[models.ProductImage])
+	if err != nil {
+		return err
+	}
+	for _, image := range images {
+		if i, ok := index[image.ProductID]; ok {
+			products[i].Images = append(products[i].Images, image)
+		}
+	}
+
+	reviewRows, err := r.db.Query(ctx, `
+		SELECT id, product_id, user_id, rating, comment, is_approved, created_at, updated_at, deleted_at
+		FROM reviews
+		WHERE product_id = ANY($1) AND deleted_at IS NULL AND is_approved = true
+		ORDER BY created_at DESC`, ids)
+	if err != nil {
+		return err
+	}
+	reviews, err := pgx.CollectRows(reviewRows, pgx.RowToStructByNameLax[models.Review])
+	if err != nil {
+		return err
+	}
+	for _, review := range reviews {
+		if i, ok := index[review.ProductID]; ok {
+			products[i].Review = append(products[i].Review, review)
+		}
+	}
+
+	return nil
 }
 
 func (r *pgxProductRepository) SaveProductReview(ctx context.Context, in *models.Review) error {
@@ -184,7 +247,7 @@ func (r *pgxProductRepository) GetProductReview(ctx context.Context, productID u
 	q := `
 		SELECT id, product_id, user_id, rating, comment, is_approved, created_at, updated_at, deleted_at
 		FROM reviews
-		WHERE product_id = $1 AND deleted_at IS NULL
+		WHERE product_id = $1 AND deleted_at IS NULL AND is_approved = true
 		ORDER BY created_at DESC`
 
 	rows, err := r.db.Query(ctx, q, productID)

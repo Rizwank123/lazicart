@@ -1,14 +1,5 @@
 -- +goose Up
 -- +goose StatementBegin
-SELECT 'up SQL query';
--- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-SELECT 'down SQL query';
--- +goose StatementEnd
--- +goose Up
--- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS "public"."inbox_messages" (
     "event_id" uuid PRIMARY KEY,
     "event_type" varchar(150) NOT NULL,

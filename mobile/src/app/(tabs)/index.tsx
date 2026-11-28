@@ -1,7 +1,7 @@
 import { FlashList } from "@shopify/flash-list";
 import { router } from "expo-router";
 import { Search, SlidersHorizontal } from "lucide-react-native";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, StyleSheet, TextInput, View } from "react-native";
 
 import { ProductCard } from "@/components/product/product-card";
@@ -16,13 +16,22 @@ export default function HomeScreen() {
   const [search, setSearch] = useState("");
   const { data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage, isRefetching } = useProducts();
   const products = flattenProducts(data?.pages);
+  const needle = search.trim().toLowerCase();
+
+  // The catalog service has no search endpoint, so the remaining pages are
+  // loaded while a search is active. Otherwise a match on a later page would
+  // be reported as missing.
+  useEffect(() => {
+    if (!needle) return;
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [needle, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
   const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
     if (!needle) return products;
     return products.filter((product) =>
       [product.name, product.brand, product.description].filter(Boolean).join(" ").toLowerCase().includes(needle),
     );
-  }, [products, search]);
+  }, [products, needle]);
   const brands = [...new Set(products.map((product) => product.brand).filter(Boolean))].slice(0, 6);
 
   if (isLoading) return <LoadingState label="Curating shelves" />;
@@ -60,7 +69,13 @@ export default function HomeScreen() {
         numColumns={2}
         contentContainerStyle={styles.list}
         ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-        ListEmptyComponent={<EmptyState title="No products yet" body="Add products in the catalog service and they will appear here." />}
+        ListEmptyComponent={
+          needle ? (
+            <EmptyState title="No matches" body={`Nothing in the catalog matches "${search.trim()}".`} />
+          ) : (
+            <EmptyState title="No products yet" body="Add products in the catalog service and they will appear here." />
+          )
+        }
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.primary} />}
         onEndReached={() => {
           if (hasNextPage && !isFetchingNextPage) fetchNextPage();

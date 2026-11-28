@@ -14,6 +14,7 @@ import (
 	"github.com/Rizwank123/LahziCart/auth-service/internal/models"
 	"github.com/Rizwank123/LahziCart/auth-service/internal/utils"
 	"github.com/Rizwank123/LahziCart/shared/events"
+	"github.com/Rizwank123/LahziCart/shared/session"
 	kafkabroker "github.com/Rizwank123/LahziCart/shared/messaging/kafkaBroker"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gofrs/uuid/v5"
@@ -52,13 +53,13 @@ func (a *AuthServiceImpl) LoginUser(userAuth *models.LoginUser) (*models.LoginRe
 	}
 	a.rdc.Set(
 		context.Background(),
-		fmt.Sprintf("access:%s", token.Jti),
+		session.AccessKey(token.Jti),
 		token.RefreshToken,
 		time.Minute*time.Duration(a.cfg.ExpireIn),
 	)
 	a.rdc.Set(
 		context.Background(),
-		fmt.Sprintf("refresh:%s", token.Jti),
+		session.RefreshKey(token.Jti),
 		token.RefreshToken,
 		time.Minute*time.Duration(a.cfg.ExpireIn),
 	)
@@ -67,26 +68,46 @@ func (a *AuthServiceImpl) LoginUser(userAuth *models.LoginUser) (*models.LoginRe
 
 // LoginWithPhone implements [models.UserAuthService].
 func (a *AuthServiceImpl) LoginWithPhone(userAuth *models.OtpLogin) (*models.LoginResponse, error) {
-	otp, err := a.rdc.Get(context.Background(), fmt.Sprintf("otp:%s", userAuth.Phone))
+	ctx := context.Background()
+
+	otp, err := a.rdc.Get(ctx, fmt.Sprintf("otp:%s", userAuth.Phone))
 	if err != nil {
-		return nil, err
+		return nil, errors.New("invalid or expired otp")
 	}
 	if otp != userAuth.Otp {
 		return nil, errors.New("invalid otp")
 	}
-	token, err := a.am.GenerateToken(userAuth.Phone, "user")
+
+	// The JWT subject must be the auth-service user id, exactly like the email
+	// login flow. Using the phone number produced a token whose subject was
+	// not a user identifier, so profile and user-scoped lookups failed.
+	res, err := a.ar.GetUserAuthByPhone(ctx, userAuth.Phone)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("user not found")
+		}
+		return nil, err
+	}
+	if res == nil {
+		return nil, errors.New("user not found")
+	}
+	if !res.IsActive {
+		return nil, errors.New("user is inactive")
+	}
+
+	token, err := a.am.GenerateToken(res.ID.String(), "user")
 	if err != nil {
 		return nil, err
 	}
 	a.rdc.Set(
-		context.Background(),
-		fmt.Sprintf("access:%s", token.Jti),
+		ctx,
+		session.AccessKey(token.Jti),
 		token.RefreshToken,
 		time.Minute*time.Duration(a.cfg.ExpireIn),
 	)
 	a.rdc.Set(
-		context.Background(),
-		fmt.Sprintf("refresh:%s", token.Jti),
+		ctx,
+		session.RefreshKey(token.Jti),
 		token.RefreshToken,
 		time.Minute*time.Duration(a.cfg.ExpireIn),
 	)
@@ -97,11 +118,11 @@ func (a *AuthServiceImpl) LoginWithPhone(userAuth *models.OtpLogin) (*models.Log
 func (a *AuthServiceImpl) Logout(jti string) error {
 	ctx := context.Background()
 
-	err := a.rdc.Delete(ctx, fmt.Sprintf("refresh:%s", jti))
+	err := a.rdc.Delete(ctx, session.RefreshKey(jti))
 	if err != nil {
 		return err
 	}
-	err = a.rdc.Delete(ctx, fmt.Sprintf("access:%s", jti))
+	err = a.rdc.Delete(ctx, session.AccessKey(jti))
 	if err != nil {
 		return err
 	}
@@ -115,7 +136,8 @@ func (a *AuthServiceImpl) RefreshToken(refreshToken string) (*models.LoginRespon
 	if refreshToken == "" {
 		return nil, errors.New("refresh token is required")
 	}
-	jwtToken, err := a.am.ValidateToken(refreshToken)
+	// Refresh tokens are signed with RefreshKey, not SecretKey.
+	jwtToken, err := a.am.ValidateRefreshToken(refreshToken)
 	if err != nil {
 		return nil, err
 	}
@@ -137,24 +159,37 @@ func (a *AuthServiceImpl) RefreshToken(refreshToken string) (*models.LoginRespon
 		return nil, errors.New("jti not found in token")
 	}
 
+	// Reject refresh tokens that were revoked (logout) or already rotated.
+	stored, err := a.rdc.Get(ctx, session.RefreshKey(jti))
+	if err != nil {
+		return nil, errors.New("refresh token is invalid or has been revoked")
+	}
+	if stored != refreshToken {
+		return nil, errors.New("refresh token has already been used")
+	}
+
 	token, err := a.am.GenerateToken(userID, "user")
 	if err != nil {
 		return nil, err
 	}
 	// Delete refresh token from cache
-	err = a.rdc.Delete(ctx, fmt.Sprintf("refresh:%s", jti))
+	err = a.rdc.Delete(ctx, session.RefreshKey(jti))
 	if err != nil {
+		return nil, err
+	}
+	// Delete the superseded access token from cache
+	if err = a.rdc.Delete(ctx, session.AccessKey(jti)); err != nil {
 		return nil, err
 	}
 	// Update access token in cache
 	accessTTl := time.Minute * time.Duration(a.cfg.ExpireIn)
-	err = a.rdc.Set(ctx, fmt.Sprintf("access:%s", token.Jti), token.RefreshToken, accessTTl)
+	err = a.rdc.Set(ctx, session.AccessKey(token.Jti), token.RefreshToken, accessTTl)
 	if err != nil {
 		return nil, err
 	}
 	// Update refresh token in cache
 	refreshTTL := time.Hour * 24 * 7
-	err = a.rdc.Set(ctx, fmt.Sprintf("refresh:%s", token.Jti), token.RefreshToken, refreshTTL)
+	err = a.rdc.Set(ctx, session.RefreshKey(token.Jti), token.RefreshToken, refreshTTL)
 	if err != nil {
 		return nil, err
 	}

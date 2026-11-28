@@ -1,0 +1,65 @@
+# Environment files and secrets
+.env
+.env.*
+*.env
+!*.env.example
+!*.env.sample
+!sampl.env
+!sample.env
+
+# Logs and crash dumps
+*.log
+*.out
+*.err
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build and generated output
+bin/
+dist/
+build/
+coverage/
+.expo/
+.next/
+web-build/
+*.tsbuildinfo
+*.test
+*.out
+
+# Go generated/binary files
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Native generated folders
+/android/
+/ios/
+.kotlin/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Certificates and keys
+*.pem
+*.key
+*.p8
+*.p12
+*.jks
+*.mobileprovision
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/

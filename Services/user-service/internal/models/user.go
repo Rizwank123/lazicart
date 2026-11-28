@@ -30,8 +30,10 @@ type (
 		Phone     string    `json:"phone,omitempty" example:"1234567890"`
 		IsActive  bool      `json:"is_active,omitempty" example:"true"`
 		Dob       time.Time `json:"dob,omitempty" format:"date" example:"2000-01-01"`
-		Address   Address   `json:"address,omitempty" db:"address"`
-		Gender    string    `json:"gender,omitempty" example:"male"`
+		// Address is a pointer so that an update that does not mention the
+		// address leaves the stored address untouched.
+		Address *Address `json:"address,omitempty" db:"address"`
+		Gender  string   `json:"gender,omitempty" example:"male"`
 	} //	@name	UpdateUser
 
 	CreateUserRequest struct {

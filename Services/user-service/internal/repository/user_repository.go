@@ -24,8 +24,12 @@ func (r *pgxUserRepository) CreateUser(ctx context.Context, user *models.User) e
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	q := `INSERT INTO users (first_name, last_name, email, phone, is_active, dob, address,auth_id) VALUES ($1, $2, $3, $4, $5, $6, $7,$8) RETURNING id, created_at, updated_at`
+	// The profile id is the auth-service id so that one UUID identifies the
+	// user everywhere: in the JWT subject claim, in the users table and in the
+	// cart, order, payment, notification and delivery services.
+	q := `INSERT INTO users (id, first_name, last_name, email, phone, is_active, dob, address, auth_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, created_at, updated_at`
 	args := []interface{}{
+		user.AuthId,
 		user.FirstName,
 		user.LastName,
 		user.Email,
@@ -61,10 +65,13 @@ func (r *pgxUserRepository) ProcessUserCreated(ctx context.Context, eventID uuid
 		return err
 	}
 
+	// The profile id is the auth-service id so that one UUID identifies the
+	// user everywhere: in the JWT subject claim, in the users table and in the
+	// cart, order, payment, notification and delivery services.
 	_, err = tx.Exec(ctx, `
-		INSERT INTO users (first_name, last_name, email, phone, is_active, dob, address, auth_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		in.FirstName, in.LastName, in.Email, in.Phone, true, in.Dob, in.Address, in.AuthId)
+		INSERT INTO users (id, first_name, last_name, email, phone, is_active, dob, address, auth_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		in.AuthId, in.FirstName, in.LastName, in.Email, in.Phone, true, in.Dob, in.Address, in.AuthId)
 	if err != nil {
 		return err
 	}
@@ -100,7 +107,7 @@ func (r *pgxUserRepository) GetUserByEmail(ctx context.Context, email string) (*
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	q := `SELECT * FROM users WHERE email = $1`
+	q := `SELECT * FROM users WHERE email = $1 AND deleted_at IS NULL`
 	args := []interface{}{
 		email,
 	}
@@ -114,21 +121,44 @@ func (r *pgxUserRepository) GetUserByEmail(ctx context.Context, email string) (*
 }
 
 // GetUserByID implements [models.UserRepository].
+//
+// The identifier may be either the users primary key or the auth_id issued by
+// the auth-service. Clients receive the auth-service identifier in the JWT
+// subject claim, while the cart, order, payment, notification and delivery
+// services are all keyed by the users primary key. Resolving both here keeps
+// those services consistent with each other.
 func (r *pgxUserRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	q := `SELECT * FROM users WHERE id = $1`
+	q := `SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL`
 	args := []interface{}{
 		id,
 	}
 	var row pgx.Rows
 	row, err := r.db.Query(ctx, q, args...)
-	resutlt, err := pgx.CollectExactlyOneRow(row, pgx.RowToStructByNameLax[models.User])
+	result, err := pgx.CollectExactlyOneRow(row, pgx.RowToStructByNameLax[models.User])
+	if err == nil {
+		return &result, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
+	// Fall back to the auth-service identifier.
+	q = `SELECT * FROM users WHERE auth_id = $1 AND deleted_at IS NULL`
+	args = []interface{}{
+		id,
+	}
+	row, err = r.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
-	return &resutlt, nil
+	result, err = pgx.CollectExactlyOneRow(row, pgx.RowToStructByNameLax[models.User])
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // GetUserByPhone implements [models.UserRepository].

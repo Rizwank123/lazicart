@@ -27,7 +27,7 @@ Implemented:
 - Payment: payment records, status updates, and payment events.
 - Notification: persisted notifications and order/payment consumers.
 - Delivery: shipment persistence and status APIs.
-- Gateway: reverse proxy and JWT protection.
+- Gateway: reverse proxy, JWT protection, and caller identity enforcement.
 - Shared: Kafka producer/consumer, retry/DLQ behavior, events, middleware, responses, metrics, and auth proto.
 - Mobile: Expo client with auth, catalog, cart, checkout, orders, notifications, profile, and delivery flows.
 
@@ -119,11 +119,15 @@ Priority: P0
 - [~] Add a shared event envelope and versioning. Implemented in `shared/events` and used by order events.
 - [~] Add outbox_events tables and relay workers to event-producing services. Order service is the first vertical slice; remaining event producers still need rollout.
 - [~] Add inbox_messages or equivalent idempotency tables to consumers. Implemented transactionally for the auth `user.created` -> user-service consumer path; remaining consumers still need adoption.
-- [~] Add checkout Idempotency-Key storage. Order service now persists an optional key and request hash atomically with the order; same-request replay returns the original order and conflicting reuse returns 409.
+- [~] Add checkout Idempotency-Key storage. Order and payment services now persist an optional key and request hash atomically with the write; same-request replay returns the original record and conflicting reuse returns 409. The mobile checkout keeps one key per attempt in the checkout store so a retry cannot create a second order or payment.
 - [~] Make Kafka brokers configurable in every consumer. User and notification consumers now use `KAFKA_BROKERS`; remaining consumer hosts still need migration.
 - [~] Add readiness checks and graceful consumer shutdown. User and notification now expose database-backed `/ready` checks and graceful Kafka shutdown; remaining hosts and richer dependency checks still need work.
 - [~] Add request, correlation, and Saga ID propagation. Gateway and shared HTTP middleware establish/propagate request and correlation IDs, preserve optional Saga IDs, and order-created envelopes carry both IDs. Active Kafka consumers now extract envelope IDs into handler context; legacy non-enveloped events still need migration.
 - [~] Add OpenTelemetry tracing. Shared tracer initialization and Echo middleware are wired into API Gateway and all HTTP services; Kafka producers now inject W3C trace context and consumers create linked spans. Collector-backed integration verification remains.
+- [x] Use one canonical user identifier across services. The user-service profile id is now the auth-service id from the JWT subject claim, so the cart, order, payment, notification and delivery rows are keyed by the same UUID. Existing rows were remapped by `scripts/remap-canonical-user-ids.sh` before migration `20261127120000_align_user_id_with_auth_id.sql` ran.
+- [x] Enforce resource ownership on user scoped routes. The gateway strips any client supplied identity, injects the authenticated caller id and rejects a request that addresses another user. The downstream services repeat the check on the resources that are addressed by id, such as cart items, orders, payments, shipments, notifications and reviews.
+- [x] Bootstrap the Kafka topics. The producer creates a topic on demand and retries a failed write, and `make kafka-topics` creates the full topic list for a fresh environment. A publish failure after a committed database write no longer turns the request into an error.
+- [x] Make a revoked session effective right away. The auth-service keeps one server side session entry per token pair and removes it on a sign out and on a refresh. The gateway now reads that state, so a token that was revoked or already replaced is rejected with a 401 instead of staying usable until it expires. The key format is shared by the writer and the reader through `shared/session`, and the gateway falls back to the signature check alone when Redis cannot be reached.
 
 Acceptance: database writes and event intent commit atomically; retries do not duplicate business effects; correlated logs follow checkout across services.
 
@@ -207,7 +211,7 @@ Priority: P1/P2
 - [ ] Coupons, promotions, taxes, and shipping fees.
 - [ ] Saved addresses.
 - [ ] Push device-token registration and notification preferences.
-- [ ] Product Q&A, review moderation, and abuse reporting.
+- [ ] Product Q&A, review moderation, and abuse reporting. New reviews are created pending moderation by default; the moderation endpoint still needs an admin role.
 - [ ] Seller/merchant capabilities if marketplace behavior is required.
 - [ ] Search, recommendation, analytics, and admin APIs.
 

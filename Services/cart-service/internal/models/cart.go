@@ -55,6 +55,8 @@ type CartRepository interface {
 	RemoveItem(ctx context.Context, itemID uuid.UUID) error
 	ClearCart(ctx context.Context, userID uuid.UUID) error
 	ListItems(ctx context.Context, cartID uuid.UUID) ([]CartItem, error)
+	// GetItemOwnerUserID resolves the user that owns a cart item.
+	GetItemOwnerUserID(ctx context.Context, itemID uuid.UUID) (uuid.UUID, error)
 }
 
 type CartService interface {
@@ -63,4 +65,6 @@ type CartService interface {
 	UpdateItem(itemID uuid.UUID, in UpdateCartItemInput) error
 	RemoveItem(itemID uuid.UUID) error
 	ClearCart(userID uuid.UUID) error
+	// GetItemOwner resolves the user that owns a cart item.
+	GetItemOwner(itemID uuid.UUID) (uuid.UUID, error)
 }

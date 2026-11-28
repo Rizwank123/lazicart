@@ -22,7 +22,7 @@ func JWTMiddleware(secret string) echo.MiddlewareFunc {
 
 			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 				return []byte(secret), nil
-			})
+			}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 
 			if err != nil || !token.Valid {
 				return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired token")

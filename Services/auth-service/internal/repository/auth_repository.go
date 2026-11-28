@@ -91,7 +91,10 @@ func (p *PgxAuthRepository) GetUserAuthById(ctx context.Context, id uuid.UUID) (
 		return nil, err
 	}
 	defer rows.Close()
-	result, err := pgx.RowToStructByNameLax[models.UserAuth](rows)
+	// CollectExactlyOneRow advances the cursor before scanning. Scanning
+	// pgx.Rows directly without Next() fails with "number of field
+	// descriptions must equal number of values".
+	result, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByNameLax[models.UserAuth])
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +114,10 @@ func (p *PgxAuthRepository) GetUserAuthByPhone(ctx context.Context, phone string
 		return nil, err
 	}
 	defer rows.Close()
-	result, err := pgx.RowToStructByNameLax[models.UserAuth](rows)
+	// CollectExactlyOneRow advances the cursor before scanning. Scanning
+	// pgx.Rows directly without Next() fails with "number of field
+	// descriptions must equal number of values".
+	result, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByNameLax[models.UserAuth])
 	if err != nil {
 		return nil, err
 	}

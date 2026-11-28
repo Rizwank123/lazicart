@@ -59,11 +59,14 @@ func (s *ProductServiceImpl) SaveReview(in models.CreateReviewInput) (models.Pro
 	}
 
 	review := models.Review{
-		ProductID:  in.ProductID,
-		UserID:     in.UserID,
-		Rating:     in.Rating,
-		Comment:    in.Comment,
-		IsApproved: in.IsApproved,
+		ProductID: in.ProductID,
+		UserID:    in.UserID,
+		Rating:    in.Rating,
+		Comment:   in.Comment,
+		// The moderation state is decided by the server, never by the
+		// client. The create input has no is_approved field for that
+		// reason.
+		IsApproved: true,
 	}
 	if err := s.repo.SaveProductReview(context.Background(), &review); err != nil {
 		s.logger.Error("failed to save review", zap.Error(err))
@@ -195,6 +198,10 @@ func (s *ProductServiceImpl) FindProductImagesByProductId(productID uuid.UUID) (
 
 func (s *ProductServiceImpl) FindReviewForProduct(productID uuid.UUID) ([]models.Review, error) {
 	return s.repo.GetProductReview(context.Background(), productID)
+}
+
+func (s *ProductServiceImpl) GetReviewByID(id uuid.UUID) (models.Review, error) {
+	return s.repo.GetReviewByID(context.Background(), id)
 }
 
 func (s *ProductServiceImpl) DeleteProdduct(id uuid.UUID) error {

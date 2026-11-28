@@ -44,3 +44,7 @@ func (s *NotificationServiceImpl) ListByUser(userID uuid.UUID, limit, page int) 
 func (s *NotificationServiceImpl) MarkSent(id uuid.UUID) error {
 	return s.repo.MarkSent(context.Background(), id)
 }
+
+func (s *NotificationServiceImpl) Get(id uuid.UUID) (*models.Notification, error) {
+	return s.repo.Get(context.Background(), id)
+}

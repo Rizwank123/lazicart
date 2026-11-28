@@ -64,3 +64,7 @@ func (s *CartServiceImpl) RemoveItem(itemID uuid.UUID) error {
 func (s *CartServiceImpl) ClearCart(userID uuid.UUID) error {
 	return s.repo.ClearCart(context.Background(), userID)
 }
+
+func (s *CartServiceImpl) GetItemOwner(itemID uuid.UUID) (uuid.UUID, error) {
+	return s.repo.GetItemOwnerUserID(context.Background(), itemID)
+}

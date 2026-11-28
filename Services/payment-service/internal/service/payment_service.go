@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Rizwank123/LahziCart/payment-service/internal/models"
@@ -23,7 +25,7 @@ func NewPaymentService(repo models.PaymentRepository, kafka *kafkabroker.Produce
 	return &PaymentServiceImpl{repo: repo, kafka: kafka, logger: logger}
 }
 
-func (s *PaymentServiceImpl) CreatePayment(in models.CreatePaymentInput) (*models.Payment, error) {
+func (s *PaymentServiceImpl) CreatePayment(in models.CreatePaymentInput, idempotencyKey string) (*models.Payment, error) {
 	if in.OrderID == uuid.Nil || in.UserID == uuid.Nil || in.Amount <= 0 {
 		return nil, errors.New("order_id, user_id and positive amount are required")
 	}
@@ -34,10 +36,19 @@ func (s *PaymentServiceImpl) CreatePayment(in models.CreatePaymentInput) (*model
 	if payment.Provider == "" {
 		payment.Provider = "manual"
 	}
-	if err := s.repo.Create(context.Background(), payment); err != nil {
+	requestHash := ""
+	if idempotencyKey != "" {
+		requestData, err := json.Marshal(in)
+		if err != nil {
+			return nil, err
+		}
+		requestHash = fmt.Sprintf("%x", sha256.Sum256(requestData))
+	}
+	created, err := s.repo.Create(context.Background(), payment, idempotencyKey, requestHash)
+	if err != nil {
 		return nil, err
 	}
-	return payment, nil
+	return created, nil
 }
 
 func (s *PaymentServiceImpl) GetPayment(id uuid.UUID) (*models.Payment, error) {

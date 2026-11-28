@@ -112,3 +112,19 @@ func (r *pgxCartRepository) ListItems(ctx context.Context, cartID uuid.UUID) ([]
 	}
 	return pgx.CollectRows(rows, pgx.RowToStructByNameLax[models.CartItem])
 }
+
+func (r *pgxCartRepository) GetItemOwnerUserID(ctx context.Context, itemID uuid.UUID) (uuid.UUID, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var userID uuid.UUID
+	err := r.db.QueryRow(ctx, `
+		SELECT c.user_id
+		FROM cart_items ci
+		JOIN carts c ON c.id = ci.cart_id
+		WHERE ci.id = $1 AND ci.deleted_at IS NULL`, itemID).Scan(&userID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return userID, nil
+}

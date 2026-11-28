@@ -1,24 +1,49 @@
 import { Image } from "expo-image";
 import { Minus, Plus, Trash2 } from "lucide-react-native";
+import { useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
+import { getApiError } from "@/api/client";
 import { Card } from "@/components/ui/card";
 import { Text } from "@/components/ui/text";
 import { useAppTheme } from "@/hooks/use-app-theme";
+import { useCartActions } from "@/hooks/use-cart";
 import type { CartItem, Product } from "@/types/api";
 import { formatMoney } from "@/utils/format";
 
 type Props = {
   item: CartItem;
   product?: Product;
-  onIncrement: () => void;
-  onDecrement: () => void;
-  onRemove: () => void;
 };
 
-export function CartRow({ item, product, onIncrement, onDecrement, onRemove }: Props) {
+export function CartRow({ item, product }: Props) {
   const { colors } = useAppTheme();
+  const actions = useCartActions();
+  const [error, setError] = useState<string | null>(null);
+  // The quantity is an absolute value, so a second tap while the first one is
+  // in flight would send the same target again. The controls are therefore
+  // disabled until the request settles.
+  const busy = actions.update.isPending || actions.remove.isPending;
   const image = product?.images?.[0]?.thumbnail_url || product?.images?.[0]?.image_url;
+
+  async function update(quantity: number) {
+    setError(null);
+    try {
+      await actions.update.mutateAsync({ itemId: item.id, quantity });
+    } catch (err) {
+      setError(getApiError(err, "Could not update the quantity"));
+    }
+  }
+
+  async function remove() {
+    setError(null);
+    try {
+      await actions.remove.mutateAsync(item.id);
+    } catch (err) {
+      setError(getApiError(err, "Could not remove the item"));
+    }
+  }
+
   return (
     <Card style={styles.card}>
       <View style={[styles.imageWrap, { backgroundColor: colors.surfaceMuted }]}>
@@ -29,12 +54,19 @@ export function CartRow({ item, product, onIncrement, onDecrement, onRemove }: P
         <Text variant="label" style={{ color: colors.primary }}>{formatMoney(item.unit_price * item.quantity, item.currency)}</Text>
         <View style={styles.actions}>
           <View style={[styles.stepper, { borderColor: colors.border }]}>
-            <Pressable onPress={onDecrement} style={styles.iconButton}><Minus size={16} color={colors.text} /></Pressable>
+            <Pressable disabled={busy} onPress={() => (item.quantity > 1 ? update(item.quantity - 1) : remove())} style={styles.iconButton}>
+              <Minus size={16} color={colors.text} />
+            </Pressable>
             <Text variant="label">{item.quantity}</Text>
-            <Pressable onPress={onIncrement} style={styles.iconButton}><Plus size={16} color={colors.text} /></Pressable>
+            <Pressable disabled={busy} onPress={() => update(item.quantity + 1)} style={styles.iconButton}>
+              <Plus size={16} color={colors.text} />
+            </Pressable>
           </View>
-          <Pressable onPress={onRemove} style={styles.iconButton}><Trash2 size={18} color={colors.danger} /></Pressable>
+          <Pressable disabled={busy} onPress={remove} style={styles.iconButton}>
+            <Trash2 size={18} color={colors.danger} />
+          </Pressable>
         </View>
+        {!!error && <Text variant="caption" style={{ color: colors.danger }}>{error}</Text>}
       </View>
     </Card>
   );

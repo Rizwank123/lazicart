@@ -1,7 +1,7 @@
 package events
 
 import (
-	"fmt"
+	"errors"
 	"time"
 
 	"github.com/segmentio/kafka-go"
@@ -21,7 +21,31 @@ const (
 	InventoryAdjusted   = "inventory.adjusted"
 )
 
+// AllTopics lists every topic the services publish to.
+var AllTopics = []string{
+	UserCreated,
+	UserUpdated,
+	UserDeleted,
+	OrderCreated,
+	OrderCancelled,
+	PaymentSucceeded,
+	PaymentFailed,
+	NotificationCreated,
+	InventoryReserved,
+	InventoryReleased,
+	InventoryAdjusted,
+}
+
+// EnsureTopic creates a topic when it does not exist yet.
+//
+// The broker does not create topics automatically in this setup, so a publish
+// to a missing topic fails with "Unknown Topic Or Partition". A topic that
+// already exists is not an error.
 func EnsureTopic(brokers []string, topic string, partitions int, replicationFactor int) error {
+	if len(brokers) == 0 {
+		return errors.New("no kafka brokers configured")
+	}
+
 	conn, err := kafka.Dial("tcp", brokers[0])
 	if err != nil {
 		return err
@@ -30,15 +54,13 @@ func EnsureTopic(brokers []string, topic string, partitions int, replicationFact
 
 	conn.SetDeadline(time.Now().Add(10 * time.Second))
 
-	controllerConn, err := kafka.Dial("tcp", fmt.Sprintf("%s", "localhost:9092"))
-	if err != nil {
-		return err
-	}
-	defer controllerConn.Close()
-
-	return controllerConn.CreateTopics(kafka.TopicConfig{
+	err = conn.CreateTopics(kafka.TopicConfig{
 		Topic:             topic,
 		NumPartitions:     partitions,
 		ReplicationFactor: replicationFactor,
 	})
+	if err != nil && !errors.Is(err, kafka.TopicAlreadyExists) {
+		return err
+	}
+	return nil
 }

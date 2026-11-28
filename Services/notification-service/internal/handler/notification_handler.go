@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/Rizwank123/LahziCart/notification-service/internal/models"
+	"github.com/Rizwank123/LahziCart/shared/identity"
 	"github.com/Rizwank123/LahziCart/shared/response"
 	"github.com/gofrs/uuid/v5"
 	"github.com/labstack/echo/v4"
@@ -33,6 +34,9 @@ func (h *NotificationHandler) ListByUser(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid user id"))
 	}
+	if err := identity.RequireOwnershipUUID(c, userID); err != nil {
+		return err
+	}
 	limit := queryInt(c, "limit", 20)
 	page := queryInt(c, "page", 1)
 	items, err := h.service.ListByUser(userID, limit, page)
@@ -46,6 +50,15 @@ func (h *NotificationHandler) MarkSent(c echo.Context) error {
 	id, err := uuid.FromString(c.Param("id"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid notification id"))
+	}
+	// The notification is loaded first so that its owner can be checked before
+	// it is marked as sent.
+	n, err := h.service.Get(id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, response.Error("notification not found"))
+	}
+	if err := identity.RequireOwnershipOptional(c, n.UserID); err != nil {
+		return err
 	}
 	if err := h.service.MarkSent(id); err != nil {
 		return c.JSON(http.StatusInternalServerError, response.Error("failed to mark notification sent"))

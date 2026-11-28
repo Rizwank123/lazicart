@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Link, router } from "expo-router";
+import { Link, router, useLocalSearchParams, type Href } from "expo-router";
 import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { Pressable, StyleSheet, View } from "react-native";
@@ -23,6 +23,8 @@ const schema = z.object({
 export default function LoginScreen() {
   const { colors } = useAppTheme();
   const setSession = useAuthStore((state) => state.setSession);
+  // The screen that sent the visitor here is returned to after signing in.
+  const { from } = useLocalSearchParams<{ from?: string }>();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { control, handleSubmit, formState } = useForm<z.infer<typeof schema>>({
@@ -36,7 +38,7 @@ export default function LoginScreen() {
     try {
       const tokens = await authApi.login(values.email, values.password);
       await setSession(tokens);
-      router.replace("/(tabs)");
+      router.replace((from?.startsWith("/") ? from : "/(tabs)") as Href);
     } catch (err) {
       setError(getApiError(err, "Login failed"));
     } finally {

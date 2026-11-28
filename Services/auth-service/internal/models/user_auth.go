@@ -12,9 +12,11 @@ type (
 	// UserAuth defines the structure of a user authentication record
 	UserAuth struct {
 		Base
-		Email    string `json:"email" db:"email"`
-		Phone    string `json:"phone" db:"phone"`
-		Password string `json:"password" db:"password"`
+		Email string `json:"email" db:"email"`
+		Phone string `json:"phone" db:"phone"`
+		// Password holds the bcrypt hash and must never be serialized: the
+		// register endpoint returns this record directly to the client.
+		Password string `json:"-" db:"password"`
 		IsActive bool   `json:"is_active" db:"is_active"`
 		BaseAudit
 	}

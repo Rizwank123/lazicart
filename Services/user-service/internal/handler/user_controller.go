@@ -2,7 +2,9 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
+	"github.com/Rizwank123/LahziCart/shared/identity"
 	"github.com/Rizwank123/LahziCart/shared/response"
 	"github.com/Rizwank123/lahziCart/user-service/internal/models"
 	"github.com/gofrs/uuid/v5"
@@ -31,6 +33,13 @@ func (c *UserController) FindUserByEmail(ctx echo.Context) error {
 
 		return ctx.JSON(http.StatusBadRequest, response.Error("email is required"))
 	}
+	// The email lookup does not carry a user id, so it has to be restricted
+	// to the authenticated caller here.
+	if err := c.requireSelfLookup(ctx, func(user *models.User) bool {
+		return strings.EqualFold(user.Email, email)
+	}); err != nil {
+		return err
+	}
 	user, err := c.us.GetUserByEmail(email)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, response.Error("failed to get user"))
@@ -51,6 +60,9 @@ func (c *UserController) FindUserByID(ctx echo.Context) error {
 	id, err := uuid.FromString(ctx.Param("id"))
 	if err != nil {
 		return ctx.JSON(http.StatusBadRequest, response.Error("id is required"))
+	}
+	if err := identity.RequireOwnershipUUID(ctx, id); err != nil {
+		return err
 	}
 	user, err := c.us.GetUserByID(id)
 	if err != nil {
@@ -73,6 +85,13 @@ func (c *UserController) FindUserByPhone(ctx echo.Context) error {
 	if phone == "" {
 		return ctx.JSON(http.StatusBadRequest, response.Error("phone is required"))
 	}
+	// The phone lookup does not carry a user id, so it has to be restricted
+	// to the authenticated caller here.
+	if err := c.requireSelfLookup(ctx, func(user *models.User) bool {
+		return strings.EqualFold(user.Phone, phone)
+	}); err != nil {
+		return err
+	}
 	user, err := c.us.GetUserByPhone(phone)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, response.Error("failed to get user"))
@@ -94,6 +113,9 @@ func (c *UserController) UpdateUser(ctx echo.Context) error {
 	id, err := uuid.FromString(ctx.Param("id"))
 	if err != nil {
 		return ctx.JSON(http.StatusBadRequest, response.Error("id is required"))
+	}
+	if err := identity.RequireOwnershipUUID(ctx, id); err != nil {
+		return err
 	}
 	var in models.UpdateUser
 	if err := ctx.Bind(&in); err != nil {
@@ -120,10 +142,35 @@ func (c *UserController) DeleteUser(ctx echo.Context) error {
 	if err != nil {
 		return ctx.JSON(http.StatusBadRequest, response.Error("id is required"))
 	}
+	if err := identity.RequireOwnershipUUID(ctx, id); err != nil {
+		return err
+	}
 	user, err := c.us.DeleteUser(id)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, response.Error("failed to delete user"))
 	}
 	return ctx.JSON(http.StatusOK, response.Success("user deleted", user))
 
+}
+
+// requireSelfLookup rejects a lookup that addresses another user's profile.
+//
+// The gateway can only compare the user id in the path, so the lookups by
+// email and phone are restricted here: the requested value has to match the
+// authenticated caller's own profile.
+func (c *UserController) requireSelfLookup(ctx echo.Context, matches func(*models.User) bool) error {
+	caller := identity.CallerID(ctx)
+	if caller == "" {
+		// The request did not come through the gateway.
+		return nil
+	}
+	callerID, err := uuid.FromString(caller)
+	if err != nil {
+		return ctx.JSON(http.StatusForbidden, response.Error("you cannot access another user's data"))
+	}
+	self, err := c.us.GetUserByID(callerID)
+	if err != nil || !matches(self) {
+		return ctx.JSON(http.StatusForbidden, response.Error("you cannot access another user's data"))
+	}
+	return nil
 }

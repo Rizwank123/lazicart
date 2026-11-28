@@ -80,12 +80,15 @@ type (
 	} // @name UpdateProductInput
 
 	// CreateReviewInput defines the model for CreateReviewInput
+	//
+	// There is deliberately no is_approved field: a new review is always
+	// created pending moderation so a client cannot approve its own review.
+	// Approval goes through the review update endpoint.
 	CreateReviewInput struct {
-		ProductID  uuid.UUID `json:"product_id" example:"d9a8f0d2-9e88-4c67-b7c2-8a4c78b76d01"`
-		UserID     uuid.UUID `json:"user_id" example:"7c4c51c3-8f84-4d8f-a5d5-0e5f6d7b8a2e"`
-		Rating     int       `json:"rating" example:"5"`
-		Comment    *string   `json:"comment,omitempty" example:"Amazing laptop with blazing fast performance."`
-		IsApproved bool      `json:"is_approved" example:"true"`
+		ProductID uuid.UUID `json:"product_id" example:"d9a8f0d2-9e88-4c67-b7c2-8a4c78b76d01"`
+		UserID    uuid.UUID `json:"user_id" example:"7c4c51c3-8f84-4d8f-a5d5-0e5f6d7b8a2e"`
+		Rating    int       `json:"rating" example:"5"`
+		Comment   *string   `json:"comment,omitempty" example:"Amazing laptop with blazing fast performance."`
 	} // @name CreateReviewInput
 	// UpdateReviewInput defines the model for Update the Review
 	UpdateReviewInput struct {
@@ -183,6 +186,8 @@ type (
 		FindProductImagesByProductId(productID uuid.UUID) (result []ProductImage, err error)
 		// FindReviewForProduct return the review of the product
 		FindReviewForProduct(productID uuid.UUID) (result []Review, err error)
+		// GetReviewByID returns a review by id
+		GetReviewByID(id uuid.UUID) (result Review, err error)
 		// DeleteProdduct delete the product by id
 		DeleteProdduct(id uuid.UUID) (err error)
 		// DeleteProductImage delete the spacific image

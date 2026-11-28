@@ -1,9 +1,11 @@
 package middleware
 
 import (
+	"context"
 	"strings"
 
 	"github.com/Rizwank123/LahziCart/shared/response"
+	"github.com/Rizwank123/LahziCart/shared/session"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
@@ -17,7 +19,7 @@ type AuthManager interface {
 
 // RedisTokenStore defines the interface for Redis token storage
 type RedisTokenStore interface {
-	Get(ctx echo.Context, key string) (string, error)
+	Get(ctx context.Context, key string) (string, error)
 }
 
 type AuthMiddleware struct {
@@ -65,12 +67,21 @@ func (a *AuthMiddleware) RequireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 			return response.Unauthorized(c, "invalid token claims")
 		}
 
-		userID, _ := claims["user_id"].(string)
+		// The subject claim carries the user id and the token id claim
+		// identifies the session. Both are issued by the auth-service.
+		userID, _ := claims["sub"].(string)
 		role, _ := claims["role"].(string)
+		jti, _ := claims["jti"].(string)
+		if jti == "" {
+			return response.Unauthorized(c, "invalid token claims")
+		}
 
 		// 2️⃣ Redis validation (logout / revoke)
-		redisKey := "access_token:" + tokenStr
-		if _, err := a.redis.Get(c, redisKey); err != nil {
+		//
+		// The auth-service removes the entry when the session is refreshed or
+		// the user signs out, so a missing entry means that the token is no
+		// longer usable.
+		if _, err := a.redis.Get(c.Request().Context(), session.AccessKey(jti)); err != nil {
 			a.logger.Warn("token revoked", zap.String("user_id", userID))
 			return response.Unauthorized(c, "token revoked")
 		}

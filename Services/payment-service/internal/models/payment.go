@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -44,15 +45,19 @@ type UpdatePaymentStatusInput struct {
 	FailureReason *string `json:"failure_reason,omitempty"`
 }
 
+// ErrIdempotencyKeyConflict is returned when an idempotency key is reused
+// with a different request payload.
+var ErrIdempotencyKeyConflict = errors.New("idempotency key was already used with a different request")
+
 type PaymentRepository interface {
-	Create(ctx context.Context, payment *Payment) error
+	Create(ctx context.Context, payment *Payment, idempotencyKey, requestHash string) (*Payment, error)
 	Get(ctx context.Context, id uuid.UUID) (*Payment, error)
 	GetByOrderID(ctx context.Context, orderID uuid.UUID) (*Payment, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string, transactionID, failureReason *string) error
 }
 
 type PaymentService interface {
-	CreatePayment(in CreatePaymentInput) (*Payment, error)
+	CreatePayment(in CreatePaymentInput, idempotencyKey string) (*Payment, error)
 	GetPayment(id uuid.UUID) (*Payment, error)
 	GetByOrderID(orderID uuid.UUID) (*Payment, error)
 	UpdateStatus(id uuid.UUID, in UpdatePaymentStatusInput) (*Payment, error)

@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/Rizwank123/LahziCart/order-service/internal/models"
+	"github.com/Rizwank123/LahziCart/shared/identity"
 	"github.com/Rizwank123/LahziCart/shared/response"
 	"github.com/gofrs/uuid/v5"
 	"github.com/labstack/echo/v4"
@@ -23,6 +24,9 @@ func (h *OrderHandler) Create(c echo.Context) error {
 	var in models.CreateOrderInput
 	if err := c.Bind(&in); err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid request"))
+	}
+	if err := identity.RequireOwnershipUUID(c, in.UserID); err != nil {
+		return err
 	}
 	if correlationID, ok := c.Get("correlation_id").(uuid.UUID); ok {
 		in.CorrelationID = &correlationID
@@ -57,6 +61,9 @@ func (h *OrderHandler) Get(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusNotFound, response.Error("order not found"))
 	}
+	if err := identity.RequireOwnershipUUID(c, order.UserID); err != nil {
+		return err
+	}
 	return c.JSON(http.StatusOK, response.Success("order found", order))
 }
 
@@ -64,6 +71,9 @@ func (h *OrderHandler) ListByUser(c echo.Context) error {
 	userID, err := uuid.FromString(c.Param("user_id"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid user id"))
+	}
+	if err := identity.RequireOwnershipUUID(c, userID); err != nil {
+		return err
 	}
 	limit := queryInt(c, "limit", 20)
 	page := queryInt(c, "page", 1)
@@ -78,6 +88,15 @@ func (h *OrderHandler) Cancel(c echo.Context) error {
 	id, err := uuid.FromString(c.Param("id"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid order id"))
+	}
+	// The order is loaded first so that its owner can be checked before the
+	// cancellation is applied.
+	order, err := h.service.GetOrder(id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, response.Error("order not found"))
+	}
+	if err := identity.RequireOwnershipUUID(c, order.UserID); err != nil {
+		return err
 	}
 	if err := h.service.CancelOrder(id); err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error(err.Error()))

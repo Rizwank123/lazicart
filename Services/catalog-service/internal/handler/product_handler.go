@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/Rizwank123/LahziCart/catalog-service/internal/models"
+	"github.com/Rizwank123/LahziCart/shared/identity"
 	"github.com/Rizwank123/LahziCart/shared/response"
 	"github.com/gofrs/uuid/v5"
 	"github.com/labstack/echo/v4"
@@ -88,6 +89,10 @@ func (h *ProductHandler) CreateReview(c echo.Context) error {
 	if err := c.Bind(&in); err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid request"))
 	}
+	// A review can only be written for the authenticated caller.
+	if err := identity.RequireOwnershipUUID(c, in.UserID); err != nil {
+		return err
+	}
 	product, err := h.service.SaveReview(in)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error(err.Error()))
@@ -112,6 +117,10 @@ func (h *ProductHandler) UpdateReview(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid review id"))
 	}
+	// Only the author of a review may change it.
+	if err := h.requireReviewOwner(c, id); err != nil {
+		return err
+	}
 	var in models.UpdateReviewInput
 	if err := c.Bind(&in); err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid request"))
@@ -128,10 +137,27 @@ func (h *ProductHandler) DeleteReview(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid review id"))
 	}
+	// Only the author of a review may delete it.
+	if err := h.requireReviewOwner(c, id); err != nil {
+		return err
+	}
 	if err := h.service.DeleteReview(id); err != nil {
 		return c.JSON(http.StatusInternalServerError, response.Error("failed to delete review"))
 	}
 	return c.JSON(http.StatusOK, response.Success("review deleted", nil))
+}
+
+// requireReviewOwner rejects the request when the caller did not write the
+// review. Requests that did not come through the gateway are not affected.
+func (h *ProductHandler) requireReviewOwner(c echo.Context, id uuid.UUID) error {
+	review, err := h.service.GetReviewByID(id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, response.Error("review not found"))
+	}
+	if err := identity.RequireOwnershipUUID(c, review.UserID); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (h *ProductHandler) CreateImage(c echo.Context) error {

@@ -20,6 +20,8 @@ type ApiGateWayConfig struct {
 	AnalyticsServiceURL      string `mapstructure:"ANALYTICS_SERVICE_URL"`
 	AdminServiceURL          string `mapstructure:"ADMIN_SERVICE_URL"`
 	JWTSecret                string `mapstructure:"JWT_SECRET"`
+	RedisHost                string `mapstructure:"REDIS_HOST"`
+	RedisPort                string `mapstructure:"REDIS_PORT"`
 }
 
 func LoadConfig() (*ApiGateWayConfig, error) {

@@ -23,10 +23,14 @@ migrate: validate
 run-all:
 	@bash "$(SCRIPTS_DIR)/run-all-services.sh"
 
+kafka-topics:
+	@bash "$(SCRIPTS_DIR)/create-kafka-topics.sh"
+
 help:
 	@echo ""
 	@echo "Usage:"
 	@echo "  make migrate SERVICE=auth-service ACTION=up"
 	@echo "  make migrate SERVICE=auth-service ACTION=down"
+	@echo "  make kafka-topics"
 	@echo "  make run-all"
 	@echo ""

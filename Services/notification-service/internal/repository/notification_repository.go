@@ -44,3 +44,18 @@ func (r *pgxNotificationRepository) MarkSent(ctx context.Context, id uuid.UUID) 
 	_, err := r.db.Exec(ctx, `UPDATE notifications SET status = 'sent', updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`, id)
 	return err
 }
+
+func (r *pgxNotificationRepository) Get(ctx context.Context, id uuid.UUID) (*models.Notification, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := r.db.Query(ctx, `SELECT id,user_id,channel,type,recipient,subject,body,status,metadata,created_at,updated_at,deleted_at FROM notifications WHERE id = $1 AND deleted_at IS NULL`, id)
+	if err != nil {
+		return nil, err
+	}
+	n, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByNameLax[models.Notification])
+	if err != nil {
+		return nil, err
+	}
+	return &n, nil
+}

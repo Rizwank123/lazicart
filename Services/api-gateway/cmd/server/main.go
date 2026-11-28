@@ -14,6 +14,7 @@ import (
 	"github.com/Rizwank123/LahziCart/api-gateway/internal/config"
 	gatewaymw "github.com/Rizwank123/LahziCart/api-gateway/internal/middleware"
 	"github.com/Rizwank123/LahziCart/api-gateway/internal/router"
+	"github.com/Rizwank123/LahziCart/shared/cache"
 	"github.com/Rizwank123/LahziCart/shared/observability"
 )
 
@@ -42,7 +43,24 @@ func main() {
 	e.Use(observability.TracingMiddleware("api-gateway"))
 	e.Use(gatewaymw.NewPropagationMiddleware().Inject)
 
-	router.Register(e, cfg)
+	// The gateway reads the session state that the auth-service writes, so a
+	// token that was revoked or already replaced by a refresh is rejected.
+	//
+	// A Redis outage does not stop the gateway. The token signature is still
+	// verified, the revocation check is skipped and the problem is reported,
+	// which keeps the public part of the catalog reachable.
+	sessions, err := cache.NewRedisClient(cfg.RedisHost, cfg.RedisPort)
+	if err != nil {
+		logger.Error("could not connect to redis, revocation is not enforced", zap.Error(err))
+	} else {
+		defer func() {
+			if err := sessions.Close(); err != nil {
+				logger.Error("could not close the redis connection", zap.Error(err))
+			}
+		}()
+	}
+
+	router.Register(e, cfg, sessions, logger)
 
 	go func() {
 		if err := e.Start(":" + cfg.AppPort); err != nil && err != http.ErrServerClosed {

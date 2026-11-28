@@ -61,10 +61,14 @@ type NotificationRepository interface {
 	Create(ctx context.Context, notification *Notification) error
 	ListByUser(ctx context.Context, userID uuid.UUID, limit, offset int64) ([]Notification, error)
 	MarkSent(ctx context.Context, id uuid.UUID) error
+	// Get returns a notification by id.
+	Get(ctx context.Context, id uuid.UUID) (*Notification, error)
 }
 
 type NotificationService interface {
 	Create(in CreateNotificationInput) (*Notification, error)
 	ListByUser(userID uuid.UUID, limit, page int) ([]Notification, error)
 	MarkSent(id uuid.UUID) error
+	// Get returns a notification by id.
+	Get(id uuid.UUID) (*Notification, error)
 }

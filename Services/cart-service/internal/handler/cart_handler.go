@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/Rizwank123/LahziCart/cart-service/internal/models"
+	"github.com/Rizwank123/LahziCart/shared/identity"
 	"github.com/Rizwank123/LahziCart/shared/response"
 	"github.com/gofrs/uuid/v5"
 	"github.com/labstack/echo/v4"
@@ -22,6 +23,9 @@ func (h *CartHandler) GetCart(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid user id"))
 	}
+	if err := identity.RequireOwnershipUUID(c, userID); err != nil {
+		return err
+	}
 	cart, err := h.service.GetCart(userID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, response.Error("failed to get cart"))
@@ -34,6 +38,9 @@ func (h *CartHandler) AddItem(c echo.Context) error {
 	if err := c.Bind(&in); err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid request"))
 	}
+	if err := identity.RequireOwnershipUUID(c, in.UserID); err != nil {
+		return err
+	}
 	cart, err := h.service.AddItem(in)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error(err.Error()))
@@ -45,6 +52,13 @@ func (h *CartHandler) UpdateItem(c echo.Context) error {
 	itemID, err := uuid.FromString(c.Param("item_id"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid item id"))
+	}
+	ownerID, err := h.service.GetItemOwner(itemID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, response.Error("cart item not found"))
+	}
+	if err := identity.RequireOwnershipUUID(c, ownerID); err != nil {
+		return err
 	}
 	var in models.UpdateCartItemInput
 	if err := c.Bind(&in); err != nil {
@@ -61,6 +75,13 @@ func (h *CartHandler) RemoveItem(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid item id"))
 	}
+	ownerID, err := h.service.GetItemOwner(itemID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, response.Error("cart item not found"))
+	}
+	if err := identity.RequireOwnershipUUID(c, ownerID); err != nil {
+		return err
+	}
 	if err := h.service.RemoveItem(itemID); err != nil {
 		return c.JSON(http.StatusInternalServerError, response.Error("failed to remove item"))
 	}
@@ -71,6 +92,9 @@ func (h *CartHandler) Clear(c echo.Context) error {
 	userID, err := uuid.FromString(c.Param("user_id"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, response.Error("invalid user id"))
+	}
+	if err := identity.RequireOwnershipUUID(c, userID); err != nil {
+		return err
 	}
 	if err := h.service.ClearCart(userID); err != nil {
 		return c.JSON(http.StatusInternalServerError, response.Error("failed to clear cart"))
